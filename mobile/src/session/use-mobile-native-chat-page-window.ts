@@ -156,7 +156,9 @@ export function useMobileNativeChatPageWindow(args: {
     (s: MobileNativeChatWindowScroller) => {
       const [at, cur] = [drawn.current, w.current]
       const firstNode = at && drawnRows.node(at.keys[at.start])
-      if (!at || !cur || !firstNode) {
+      // Before the observer reports every drawn row, a guess would move the window off the reader.
+      const unmeasured = at && at.keys.slice(at.start, at.end).some((key) => heights.px(key) === undefined)
+      if (!at || !cur || !firstNode || unmeasured) {
         return
       }
       const next = coverMobileNativeChatWindow(

@@ -26,7 +26,7 @@ export function coverMobileNativeChatWindow(
   for (let at = start; at < end; at += 1) {
     bottom += height(at)
   }
-  if (top > scrollTop + viewport || bottom < scrollTop) {
+  if (!following && (top > scrollTop + viewport || bottom < scrollTop)) {
     // Nothing drawn is on screen, so nothing needs to stay still: draw where the reader is.
     if (top > scrollTop) {
       while (start > 0 && known(start - 1) !== undefined && top > scrollTop) {
