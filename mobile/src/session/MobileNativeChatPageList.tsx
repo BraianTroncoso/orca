@@ -19,6 +19,7 @@ import type { MobileNativeChatRowKeys } from './mobile-native-chat-row-keys'
 import { styles } from './mobile-native-chat-view-styles'
 import { MobileNativeChatPageScroll } from './MobileNativeChatPageScroll'
 import type { MobileNativeChatListHandle } from './use-mobile-native-chat-tail-follow'
+import type { MobileNativeChatTurnRow } from './use-mobile-native-chat-turn-disclosure'
 import {
   useMobileNativeChatPageWindow,
   type MobileNativeChatWindowScroller
@@ -34,7 +35,7 @@ type Props = {
   rowKeys: Pick<MobileNativeChatRowKeys, 'scope' | 'sourceHead' | 'keyOf' | 'current'>
   renderItem: (row: Row) => ReactElement
   /** What a row draws besides itself; a height measured for other state no longer holds. */
-  rowState: (index: number, row: NativeChatMessage) => object
+  rowState: (index: number, row: NativeChatMessage) => MobileNativeChatTurnRow
   layoutKey: string
   /** `measuring`: rows above are not measured yet, so the Load earlier slot shows loading. */
   header: (measuring: boolean) => ReactElement | null

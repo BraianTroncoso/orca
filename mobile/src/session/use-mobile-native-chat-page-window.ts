@@ -1,9 +1,12 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import type { MobileNativeChatRowKeys } from './mobile-native-chat-row-keys'
 import { MobileNativeChatPageHeights } from './mobile-native-chat-page-heights'
 import { MobileNativeChatPageMotion } from './mobile-native-chat-page-motion'
+import { MobileNativeChatPageRows } from './mobile-native-chat-page-rows'
+import type { MobileNativeChatTurnRow } from './use-mobile-native-chat-turn-disclosure'
 import { coverMobileNativeChatWindow } from './mobile-native-chat-page-window-coverage'
+import { useMobileNativeChatPageRender } from './use-mobile-native-chat-page-render'
 
 /** Rows measured in one settled moment: few enough not to drop a frame. */
 const MEASURE_ROWS = 24
@@ -24,7 +27,7 @@ export type MobileNativeChatWindowScroller = Measured & {
   removeEventListener: (type: string, listener: () => void) => void
 }
 
-type RowState = (index: number, row: NativeChatMessage) => object
+type RowState = (index: number, row: NativeChatMessage) => MobileNativeChatTurnRow
 type Group = { from: string; fromAt: number; to: string; toAt: number }
 
 /** Where the window stands, by key, so landings and trims never change which rows are drawn. */
@@ -54,10 +57,6 @@ type Drawn = {
   layoutKey: string
 }
 
-function isElement(node: unknown): node is Element {
-  return typeof Element !== 'undefined' && node instanceof Element
-}
-
 /** The page's rows near the screen, keyed. Above the window the spacer stands only for measured rows:
  *  rows never measured are left out, and are measured in place only while nothing can move the
  *  reader (following, or settled), because iOS stops momentum on any scroll write. */
@@ -70,32 +69,17 @@ export function useMobileNativeChatPageWindow(args: {
   scroller: () => MobileNativeChatWindowScroller | null | undefined
 }) {
   const { rows, rowKeys, rowState, following, layoutKey, scroller } = args
-  const store = useRef({ version: 0, notify: () => {} })
-  const subscribe = useCallback((notify: () => void) => {
-    store.current.notify = notify
-    return () => {
-      store.current.notify = () => {}
-    }
-  }, [])
-  useSyncExternalStore(subscribe, () => store.current.version)
-  const render = useCallback(() => {
-    store.current.version += 1
-    store.current.notify()
-  }, [])
+  const render = useMobileNativeChatPageRender()
   const [heights] = useState(() => new MobileNativeChatPageHeights())
   const w = useRef<Win | null>(null)
   const drawn = useRef<Drawn | null>(null)
   const settle = useRef(false)
-  const anchor = useRef<{ key: string; top: number } | null>(null)
+  const [drawnRows] = useState(() => new MobileNativeChatPageRows())
   const anchorStale = useRef(false)
   const width = useRef(0)
   const viewport = useRef(globalThis.innerHeight || 800)
   const lastScan = useRef(0)
   const rescan = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const observer = useRef<ResizeObserver | null>(null)
-  const nodes = useRef(new Map<string, Element>())
-  const nodeKeys = useRef(new WeakMap<Element, string>())
-  const refs = useRef(new Map<string, (node: unknown) => void>())
   const onSettled = useRef(() => {})
   const [motion] = useState(() => new MobileNativeChatPageMotion(() => onSettled.current()))
   const keys = useMemo(() => rows.map(rowKeys.keyOf), [rows, rowKeys.keyOf])
@@ -114,8 +98,8 @@ export function useMobileNativeChatPageWindow(args: {
     for (let filled = 0; first > 0 && filled < viewport.current; first -= 1) {
       filled += heights.px(keys[first - 1]) ?? heights.estimate()
     }
-    const scope = rowKeys.scope
-    return { scope, first: keys[first] ?? '', firstAt: first, last: null, lastAt: n - 1, slack: 0, measure: null }
+    const seat = { first: keys[first] ?? '', firstAt: first, last: null, lastAt: n - 1 }
+    return { scope: rowKeys.scope, ...seat, slack: 0, measure: null }
   }
 
   const kept = w.current?.scope === rowKeys.scope && w.current.first !== '' ? w.current : null
@@ -146,21 +130,7 @@ export function useMobileNativeChatPageWindow(args: {
       ;[m0, m1] = [from, to]
     }
   }
-  let mid = 0
-  for (let i = m1; i < start; i += 1) {
-    mid += heights.px(keys[i]) ?? 0
-  }
-  let first = m0
-  let above = slack
-  for (let px = heights.px(keys[first - 1]); first > 0 && px !== undefined; ) {
-    above += px
-    first -= 1
-    px = heights.px(keys[first - 1])
-  }
-  let bottom = 0
-  for (let i = end; i < n; i += 1) {
-    bottom += heights.px(keys[i]) ?? heights.estimate()
-  }
+  const { first, above, mid, bottom } = heights.spacers(keys, [m0, m1], [start, end], slack)
   const measuring = n > 0 && Math.min(m0, start) > 0 && heights.px(keys[0]) === undefined
 
   const write = useCallback(
@@ -174,28 +144,18 @@ export function useMobileNativeChatPageWindow(args: {
     [motion]
   )
 
-  const takeAnchor = useCallback((s: MobileNativeChatWindowScroller) => {
-    const at = drawn.current
-    const view = s.getBoundingClientRect().top
-    let [low, high] = [at?.start ?? 0, at?.end ?? 0]
-    while (low < high) {
-      const middle = low + Math.floor((high - low) / 2)
-      const node = nodes.current.get(at!.keys[middle]!)
-      if (!node || node.getBoundingClientRect().bottom <= view) {
-        low = middle + 1
-      } else {
-        high = middle
-      }
-    }
-    const key = at?.keys[low]
-    const node = key === undefined ? undefined : nodes.current.get(key)
-    anchor.current = key && node ? { key, top: node.getBoundingClientRect().top - view } : null
-  }, [])
+  const takeAnchor = useCallback(
+    (s: MobileNativeChatWindowScroller) => {
+      const at = drawn.current
+      drawnRows.takeAnchor(s, at?.keys ?? [], at?.start ?? 0, at?.end ?? 0)
+    },
+    [drawnRows]
+  )
 
   const cover = useCallback(
     (s: MobileNativeChatWindowScroller) => {
       const [at, cur] = [drawn.current, w.current]
-      const firstNode = at && nodes.current.get(at.keys[at.start] ?? '')
+      const firstNode = at && drawnRows.node(at.keys[at.start])
       if (!at || !cur || !firstNode) {
         return
       }
@@ -216,12 +176,12 @@ export function useMobileNativeChatPageWindow(args: {
       if (next) {
         const last = next.end >= at.keys.length ? null : at.keys[next.end - 1]!
         const measure = next.start === at.start ? cur.measure : null
-        const moved = { first: at.keys[next.start]!, firstAt: next.start, last, lastAt: next.end - 1 }
-        w.current = { ...cur, ...moved, measure }
+        const moved = { first: at.keys[next.start]!, firstAt: next.start, last }
+        w.current = { ...cur, ...moved, lastAt: next.end - 1, measure }
         render()
       }
     },
-    [heights, render]
+    [heights, render, drawnRows]
   )
 
   // Owed work that can move rows above the reader, done only while settled: measure the nearest rows
@@ -241,20 +201,13 @@ export function useMobileNativeChatPageWindow(args: {
       return
     }
     lastScan.current = Date.now()
-    const shape = `${at.layoutKey}:${width.current}`
-    const valid = (i: number): boolean =>
-      heights.valid(at.keys[i]!, at.rows[i]!, at.rowState(i, at.rows[i]!), shape)
-    let [i, distance] = [at.start - 1, 0]
-    for (; i >= 0 && valid(i); i -= 1) {
-      distance += heights.px(at.keys[i]) ?? 0
-    }
-    let measure: Group | null = null
-    if (i >= 0 && (at.following || distance <= MEASURE_REACH * viewport.current)) {
-      let from = i
-      while (from > 0 && i - from + 1 < MEASURE_ROWS && !valid(from - 1)) {
-        from -= 1
-      }
-      measure = { from: at.keys[from]!, fromAt: from, to: at.keys[i]!, toAt: i }
+    const reach = at.following ? Infinity : MEASURE_REACH * viewport.current
+    const run = heights.nearestStale(at, `${at.layoutKey}:${width.current}`, reach, MEASURE_ROWS)
+    const measure: Group | null = run && {
+      from: at.keys[run[0]]!,
+      fromAt: run[0],
+      to: at.keys[run[1]]!,
+      toAt: run[1]
     }
     if (measure || cur.slack > 0 || cur.measure) {
       w.current = { ...cur, measure }
@@ -268,13 +221,14 @@ export function useMobileNativeChatPageWindow(args: {
     if (w.current && w.current.scope !== rowKeys.scope) {
       heights.clear()
       motion.release()
-      anchor.current = null
+      drawnRows.forgetAnchor()
     }
     const last = end >= n ? null : keys[end - 1]!
-    const measure = m0 < m1 ? { from: keys[m0]!, fromAt: m0, to: keys[m1 - 1]!, toAt: m1 - 1 } : null
-    w.current = { ...win, first: keys[start] ?? '', firstAt: start, last, lastAt: end - 1, slack, measure }
-    const sourceHead = rowKeys.sourceHead
-    drawn.current = { keys, rows, indexOf, rowState, start, end, first, sourceHead, following, layoutKey }
+    const m = m0 < m1 ? { from: keys[m0]!, fromAt: m0, to: keys[m1 - 1]!, toAt: m1 - 1 } : null
+    const seat = { first: keys[start] ?? '', firstAt: start, last, lastAt: end - 1 }
+    w.current = { ...win, ...seat, slack, measure: m }
+    const fresh = { keys, rows, indexOf, rowState, start, end, first, following, layoutKey }
+    drawn.current = { ...fresh, sourceHead: rowKeys.sourceHead }
     settle.current = false
     const s = scroller()
     if (s && anchorStale.current) {
@@ -319,24 +273,23 @@ export function useMobileNativeChatPageWindow(args: {
       }
       viewport.current = s.clientHeight
       width.current = s.clientWidth
-      const shape = `${at.layoutKey}:${width.current}`
+      const layout = `${at.layoutKey}:${width.current}`
       for (const entry of entries) {
-        const key = nodeKeys.current.get(entry.target)
+        const key = drawnRows.keyOf(entry.target)
         const i = at.indexOf(key)
         if (key !== undefined && i !== undefined) {
           const row = at.rows[i]!
-          heights.remember(key, entry.contentRect.height, row, at.rowState(i, row), shape)
+          heights.remember(key, entry.contentRect.height, row, at.rowState(i, row), layout)
         }
       }
-      const held = anchor.current && nodes.current.get(anchor.current.key)
-      if (!at.following && motion.settled() && anchor.current && held) {
-        const view = s.getBoundingClientRect().top
-        write(s, s.scrollTop + held.getBoundingClientRect().top - view - anchor.current.top)
+      const drift = !at.following && motion.settled() ? drawnRows.anchorDrift(s) : null
+      if (drift !== null) {
+        write(s, s.scrollTop + drift)
       }
       cover(s)
       motion.poke()
     },
-    [scroller, heights, motion, write, cover]
+    [scroller, heights, motion, write, cover, drawnRows]
   )
 
   /** The place-hold's correction: written only while settled. Mid-motion the reader already saw the
@@ -352,39 +305,21 @@ export function useMobileNativeChatPageWindow(args: {
     [scroller, motion, write]
   )
 
-  const observeWith = useCallback((next: ResizeObserver | null) => {
-    observer.current = next
-    nodes.current.forEach((node) => next?.observe(node))
-  }, [])
-
-  const rowRef = useCallback((key: string) => {
-    let ref = refs.current.get(key)
-    if (!ref) {
-      ref = (node: unknown) => {
-        const was = nodes.current.get(key)
-        if (was) {
-          observer.current?.unobserve(was)
-          nodes.current.delete(key)
-        }
-        if (isElement(node)) {
-          nodes.current.set(key, node)
-          nodeKeys.current.set(node, key)
-          observer.current?.observe(node)
-        } else {
-          refs.current.delete(key)
-        }
-      }
-      refs.current.set(key, ref)
-    }
-    return ref
-  }, [])
-
-  const settled = useCallback(() => motion.whenSettled(), [motion])
-  const wrote = useCallback((target: number) => motion.wrote(target), [motion])
+  // Stable, so the list's handle (and with it the one observer) is made once.
+  const list = useMemo(
+    () => ({
+      afterResize,
+      keepInPlace,
+      observeWith: drawnRows.observeWith,
+      settled: () => motion.whenSettled(),
+      wrote: (target: number) => motion.wrote(target)
+    }),
+    [afterResize, keepInPlace, drawnRows, motion]
+  )
 
   return {
     view: { m0, m1, start, end, above, mid, bottom, measuring },
-    rowRef,
-    list: { afterResize, keepInPlace, observeWith, settled, wrote }
+    rowRef: drawnRows.ref,
+    list
   }
 }

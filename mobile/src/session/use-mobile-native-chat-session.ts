@@ -309,7 +309,7 @@ export function useMobileNativeChatSession(args: {
         // it waited stay.
         const live = mergerRef.current.list
         const after = live.findIndex((message) => message.id === result.messages.at(-1)?.id)
-        setList(after < 0 ? result.messages : [...result.messages, ...live.slice(after + 1)])
+        setList(after === -1 ? result.messages : [...result.messages, ...live.slice(after + 1)])
         more = result.messages.length >= nextLimit
       }
       setHasMore(more)

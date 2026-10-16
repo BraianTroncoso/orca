@@ -90,6 +90,8 @@ export type MobileNativeChatTailFollow = {
    *  gets the place-hold's write while WebKit owns the scroll, and the list stops scrolling. */
   scrollMayLoadEarlier: () => boolean
   recordScrollMetrics: (event: NativeScrollEvent) => void
+  /** Page only: an older page waits for it, so it never lands under a reader who is scrolling. */
+  pageSettled: (() => Promise<void>) | undefined
   /** Read at commit by the page's place-hold: the list, and whether the reader follows the end. */
   placeHold: { listRef: RefObject<MobileNativeChatListHandle | null>; isFollowing: () => boolean }
 }
@@ -288,6 +290,7 @@ export function useMobileNativeChatTailFollow(args: {
   )
 
   const isFollowing = useCallback(() => followingRef.current, [])
+  const pageSettled = useCallback(() => listRef.current?.settled?.() ?? Promise.resolve(), [])
 
   // The view stays mounted across chats: before paint, so the next one never shows where the reader
   // left the last. Page only until the native list takes the same reset.
@@ -318,6 +321,7 @@ export function useMobileNativeChatTailFollow(args: {
     endMomentum,
     scrollMayLoadEarlier,
     recordScrollMetrics,
+    pageSettled: listReportsGestures() ? undefined : pageSettled,
     placeHold: { listRef, isFollowing }
   }
 }

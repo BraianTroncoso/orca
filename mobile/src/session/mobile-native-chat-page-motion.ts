@@ -26,7 +26,7 @@ export class MobileNativeChatPageMotion {
 
   scrolled(scrollTop: number): void {
     const at = this.own.findIndex((target) => Math.abs(target - scrollTop) <= 1)
-    if (at >= 0) {
+    if (at !== -1) {
       this.own.splice(0, at + 1)
       return
     }

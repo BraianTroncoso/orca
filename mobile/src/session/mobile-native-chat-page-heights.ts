@@ -1,10 +1,11 @@
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
+import type { MobileNativeChatTurnRow } from './use-mobile-native-chat-turn-disclosure'
 
 const FIRST_ESTIMATE = 80
 
-type Entry = { px: number; row: NativeChatMessage; state: object; layout: string }
+type Entry = { px: number; row: NativeChatMessage; state: MobileNativeChatTurnRow; layout: string }
 
-function sameState(a: object, b: object): boolean {
+function sameState(a: MobileNativeChatTurnRow, b: MobileNativeChatTurnRow): boolean {
   const before = Object.entries(a)
   const after = new Map(Object.entries(b))
   return before.length === after.size && before.every(([name, value]) => after.get(name) === value)
@@ -26,7 +27,12 @@ export class MobileNativeChatPageHeights {
     return this.entries.size > 0 ? this.sum / this.entries.size : FIRST_ESTIMATE
   }
 
-  valid(key: string, row: NativeChatMessage, state: object, layout: string): boolean {
+  valid(
+    key: string,
+    row: NativeChatMessage,
+    state: MobileNativeChatTurnRow,
+    layout: string
+  ): boolean {
     const entry = this.entries.get(key)
     return (
       entry !== undefined &&
@@ -36,9 +42,68 @@ export class MobileNativeChatPageHeights {
     )
   }
 
-  remember(key: string, px: number, row: NativeChatMessage, state: object, layout: string): void {
+  remember(
+    key: string,
+    px: number,
+    row: NativeChatMessage,
+    state: MobileNativeChatTurnRow,
+    layout: string
+  ): void {
     this.sum += px - (this.entries.get(key)?.px ?? 0)
     this.entries.set(key, { px, row, state, layout })
+  }
+
+  /** Spacer heights around the measuring rows `[m0, m1)` and the window `[start, end)`: above them
+   *  only the measured run (from `first`, plus trim `slack`), between them, and below the window. */
+  spacers(
+    keys: readonly string[],
+    [m0, m1]: [number, number],
+    [start, end]: [number, number],
+    slack: number
+  ): { first: number; above: number; mid: number; bottom: number } {
+    let [first, above, mid, bottom] = [m0, slack, 0, 0]
+    for (let px = this.px(keys[first - 1]); first > 0 && px !== undefined; ) {
+      above += px
+      first -= 1
+      px = this.px(keys[first - 1])
+    }
+    for (let i = m1; i < start; i += 1) {
+      mid += this.px(keys[i]) ?? 0
+    }
+    for (let i = end; i < keys.length; i += 1) {
+      bottom += this.px(keys[i]) ?? this.estimate()
+    }
+    return { first, above, mid, bottom }
+  }
+
+  /** The run of rows nearest above `start` whose heights don't hold, `[from, to]`, at most `rows`
+   *  long and within `reach` px of measured rows above the window; null when there is none. */
+  nearestStale(
+    drawn: {
+      keys: readonly string[]
+      rows: readonly NativeChatMessage[]
+      rowState: (index: number, row: NativeChatMessage) => MobileNativeChatTurnRow
+      start: number
+    },
+    layout: string,
+    reach: number,
+    rows: number
+  ): [number, number] | null {
+    const { keys, start } = drawn
+    const valid = (i: number): boolean =>
+      this.valid(keys[i]!, drawn.rows[i]!, drawn.rowState(i, drawn.rows[i]!), layout)
+    let [to, distance] = [start - 1, 0]
+    for (; to >= 0 && valid(to); to -= 1) {
+      distance += this.px(keys[to]) ?? 0
+    }
+    if (to < 0 || distance > reach) {
+      return null
+    }
+    let from = to
+    while (from > 0 && to - from + 1 < rows && !valid(from - 1)) {
+      from -= 1
+    }
+    return [from, to]
   }
 
   clear(): void {
