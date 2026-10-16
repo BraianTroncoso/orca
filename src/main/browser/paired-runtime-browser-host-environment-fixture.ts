@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 import type { PairedRuntimeConnection } from '../../shared/paired-runtime-connection'
-import type { KnownRuntimeEnvironment } from '../../shared/runtime-environments'
+import type {
+  KnownRuntimeEnvironment,
+  RuntimeEnvironmentPreviousPairing
+} from '../../shared/runtime-environments'
 
 export type PairedRuntimeHostKind = 'manual' | 'plain-ssh' | 'managed-ssh' | 'wsl'
 
@@ -12,6 +15,7 @@ export type PairedRuntimeHostEnvironmentOptions = {
   publicKeyB64?: string
   /** WSL only; null models a record written before the registration GUID was captured. */
   distroId?: string | null
+  previousPairing?: RuntimeEnvironmentPreviousPairing
 }
 
 export const WSL_DISTRO_ID_A = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
@@ -31,6 +35,7 @@ export function pairedRuntimeHostEnvironment(
     runtimeId: null,
     pairingRevision: options.pairingRevision ?? 1_000,
     ...(options.pairedDeviceId === undefined ? {} : { pairedDeviceId: options.pairedDeviceId }),
+    ...(options.previousPairing === undefined ? {} : { previousPairing: options.previousPairing }),
     preferredEndpointId: 'endpoint-a',
     endpoints: [
       {

@@ -29,6 +29,10 @@ export type BrowserRoutePartitionMigration = {
  * at the durable fingerprint instead, and keeps its cookies. Once adopted, the
  * fingerprint alone resolves the partition, so the legacy names are never needed
  * again -- including after the server restarts or re-pairs.
+ *
+ * Downgrade: an older build cannot resolve an adopted binding, so it either refuses with
+ * `browser_route_partition_binding_conflict` or derives an empty partition. The logins stay
+ * hidden until the user upgrades again; nothing is deleted.
  */
 export function resolveBrowserRoutePartitionBinding(
   migration: BrowserRoutePartitionMigration

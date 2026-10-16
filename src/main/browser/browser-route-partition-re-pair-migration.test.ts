@@ -165,6 +165,52 @@ describe('browser logins across a managed host re-pair', () => {
     expect([...persisted.keys()]).toEqual([preW1Partition])
   })
 
+  // Why: the browser host starts lazily, so orcad can update and re-pair before any page opens.
+  it.each(['managed-ssh', 'wsl'] as const)(
+    'adopts the pre-upgrade jar of a %s host that re-paired before the first page opened',
+    async (kind) => {
+      const desktop = createDesktop()
+      const preW1Partition = seedPreW1Login(desktop, rotatingHost(kind, 1_000, 'device-a'))
+      const rePairedBeforeFirstPage = pairedRuntimeHostEnvironment({
+        kind,
+        pairingRevision: 2_000,
+        pairedDeviceId: 'device-b',
+        previousPairing: { pairingRevision: 1_000, pairedDeviceId: 'device-a' }
+      })
+
+      const partition = await launchAndOpenPage(desktop, rePairedBeforeFirstPage, 'runtime-b')
+      const afterNextRePair = await launchAndOpenPage(
+        desktop,
+        pairedRuntimeHostEnvironment({
+          kind,
+          pairingRevision: 3_000,
+          pairedDeviceId: 'device-c',
+          previousPairing: { pairingRevision: 2_000, pairedDeviceId: 'device-b' }
+        }),
+        'runtime-c'
+      )
+
+      expect(partition).toBe(preW1Partition)
+      expect(afterNextRePair).toBe(preW1Partition)
+      expect(desktop.cookies.get(partition)).toEqual(['session=signed-in'])
+    }
+  )
+
+  // Why: a key change is a different trust decision, so the replaced pairing's jar stays behind.
+  it('never adopts the pre-upgrade jar across a server key change', async () => {
+    const desktop = createDesktop()
+    const preW1Partition = seedPreW1Login(desktop, rotatingHost('managed-ssh', 1_000, 'device-a'))
+    const reKeyed = pairedRuntimeHostEnvironment({
+      kind: 'managed-ssh',
+      pairingRevision: 2_000,
+      pairedDeviceId: 'device-b',
+      publicKeyB64: 'host-key-b',
+      previousPairing: { pairingRevision: 1_000, pairedDeviceId: 'device-a' }
+    })
+
+    expect(await launchAndOpenPage(desktop, reKeyed, 'runtime-b')).not.toBe(preW1Partition)
+  })
+
   it.each(['manual', 'plain-ssh'] as const)(
     'leaves a %s host on its pre-W1 partition',
     async (kind) => {

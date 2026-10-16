@@ -39,12 +39,24 @@ export function derivePairedRuntimeBrowserAuthorityIdentities(
 ): PairedRuntimeBrowserAuthorityIdentities {
   const { orcaProfileId, environment, connection } = input
   const pairingRevision = environment.pairingRevision ?? environment.createdAt
-  const revisionScoped = revisionScopedAuthorityConnectionIdentity(
-    orcaProfileId,
-    environment.id,
+  const revisionScoped = revisionScopedAuthorityConnectionIdentity(orcaProfileId, environment.id, {
     pairingRevision,
-    connection
-  )
+    hostPublicKeyB64: connection.hostPublicKeyB64,
+    pairedDeviceId: connection.pairedDeviceId
+  })
+  const previous = environment.previousPairing
+  // Why: a re-pair before the first page opened on this build still owns the user's jar. The
+  // current key keeps it to this host: a re-pair that changed keys derives an unbound identity.
+  const revisionScopedHistory = previous
+    ? [
+        revisionScoped,
+        revisionScopedAuthorityConnectionIdentity(orcaProfileId, environment.id, {
+          pairingRevision: previous.pairingRevision,
+          hostPublicKeyB64: connection.hostPublicKeyB64,
+          pairedDeviceId: previous.pairedDeviceId
+        })
+      ]
+    : [revisionScoped]
   const legacyAuthorityConnectionIdentity = runtimeScopedAuthorityConnectionIdentity(
     orcaProfileId,
     environment.id,
@@ -72,7 +84,7 @@ export function derivePairedRuntimeBrowserAuthorityIdentities(
           connection,
           ['wsl', distroId]
         ),
-        adoptableAuthorityConnectionIdentities: [revisionScoped],
+        adoptableAuthorityConnectionIdentities: revisionScopedHistory,
         legacyAuthorityConnectionIdentity
       }
     }
@@ -86,7 +98,7 @@ export function derivePairedRuntimeBrowserAuthorityIdentities(
       if (getOrcadSshDeployment(environment)) {
         return {
           authorityConnectionIdentity: managedSsh,
-          adoptableAuthorityConnectionIdentities: [revisionScoped],
+          adoptableAuthorityConnectionIdentities: revisionScopedHistory,
           legacyAuthorityConnectionIdentity
         }
       }
@@ -105,17 +117,22 @@ export function derivePairedRuntimeBrowserAuthorityIdentities(
 function revisionScopedAuthorityConnectionIdentity(
   orcaProfileId: string,
   environmentId: string,
-  pairingRevision: number,
-  connection: PairedRuntimeConnection
+  pairing: RevisionScopedPairing
 ): string {
   return connectionIdentityDigest([
     'paired-runtime-browser',
     orcaProfileId,
     environmentId,
-    pairingRevision,
-    connection.hostPublicKeyB64,
-    connection.pairedDeviceId ?? null
+    pairing.pairingRevision,
+    pairing.hostPublicKeyB64,
+    pairing.pairedDeviceId ?? null
   ])
+}
+
+type RevisionScopedPairing = {
+  pairingRevision: number
+  hostPublicKeyB64: string
+  pairedDeviceId?: string
 }
 
 /** Superseded per-process identity, kept only so its partition can be adopted. */
