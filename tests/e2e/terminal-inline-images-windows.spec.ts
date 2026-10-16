@@ -91,7 +91,49 @@ for (const runtime of ['native', 'wsl'] as const) {
       if (runtime === 'wsl') {
         await waitForTerminalOutput(orcaPage, 'WSL_IMAGE_PROTOCOL=kitty', 30_000)
       }
-      await assertInlineImagePixels(orcaPage, testInfo.outputPath('windows-inline-protocols.png'))
+      try {
+        await assertInlineImagePixels(orcaPage, testInfo.outputPath('windows-inline-protocols.png'))
+      } catch (error) {
+        const dump = await orcaPage.evaluate(() => {
+          const tab = window.__store!.getState().activeTabId
+          const manager = tab ? window.__paneManagers?.get(tab) : undefined
+          const term = manager?.getActivePane()?.terminal as any
+          const core = term._core
+          const addon = core._addonManager._addons.map((a: any) => a.instance).find((a: any) => a._storage)
+          const storage = addon._storage
+          const renderer = storage._renderer
+          const layers = [...renderer._layers.entries()].map(([k, ctx]: any) => ({ k, w: ctx.canvas.width, h: ctx.canvas.height, cssW: ctx.canvas.style.width, inDom: ctx.canvas.isConnected }))
+          const images = [...storage._images.entries()].map(([id, sp]: any) => ({ id, tiles: sp.tileCount, origW: sp.orig?.width, origH: sp.orig?.height, actW: sp.actual?.width, actH: sp.actual?.height, origCell: sp.origCellSize, actCell: sp.actualCellSize, layer: sp.layer, buf: sp.bufferType }))
+          const buffer = core.buffer
+          const rowsWithTiles: string[] = []
+          for (let row = 0; row < term.rows; row++) {
+            const line = buffer.lines.get(row + buffer.ydisp)
+            if (!line) { rowsWithTiles.push(`${row}:noline`); continue }
+            const ids: string[] = []
+            for (let col = 0; col < term.cols; col++) {
+              const e = line.getExtended(col)?.payload
+              if (e && e.imageId !== undefined && e.imageId !== -1) ids.push(`${e.imageId}/${e.tileId}`)
+            }
+            if (ids.length) rowsWithTiles.push(`${row}:${ids[0]}..${ids[ids.length - 1]}(${ids.length})`)
+          }
+          const dims = core._renderService.dimensions
+          const countBlue = () => {
+            const ctx = renderer._layers.get('top')
+            if (!ctx) return -1
+            const d = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height).data
+            let n = 0
+            for (let p = 0; p < d.length; p += 4) if (d[p + 2] > 220 && d[p] < 60 && d[p + 1] < 60 && d[p + 3] > 200) n++
+            return n
+          }
+          const before = countBlue()
+          term.refresh(0, term.rows - 1)
+          return { cols: term.cols, rows: term.rows, ydisp: buffer.ydisp, ybase: buffer.ybase, cell: dims.css.cell, canvas: dims.css.canvas, cellSize: renderer.cellSize, layers, images, rowsWithTiles, blueLayerPixelsBefore: before, fullyCleared: storage._fullyCleared, needsFullClear: storage._needsFullClear, renderer: core._renderService._renderer?.value?.constructor?.name, paused: core._renderService._isPaused }
+        })
+        console.log('REPAINT_DIAG', JSON.stringify(dump))
+        await new Promise((r) => setTimeout(r, 500))
+        await orcaPage.screenshot({ path: testInfo.outputPath('windows-inline-after-refresh.png') })
+        throw error
+      }
       await assertKittyPlaceholderPixels(
         orcaPage,
         testInfo.outputPath('windows-inline-placeholders.png')

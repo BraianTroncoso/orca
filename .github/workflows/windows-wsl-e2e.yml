@@ -70,7 +70,8 @@ jobs:
           --config tests/playwright.config.ts
           --project=electron-headful
           --output=test-results/terminal-images
-          --repeat-each=3
+          --grep "wsl, off"
+          --repeat-each=20
           --workers=1
       - name: Upload terminal image proof
         uses: actions/upload-artifact@v7
@@ -79,6 +80,7 @@ jobs:
           name: windows-wsl-terminal-image-proof
           path: |
             test-results/**/windows-inline-*.png
+            test-results/**/test-failed-*.png
             test-results/**/windows-file-placeholders.png
           retention-days: 7
           if-no-files-found: error
