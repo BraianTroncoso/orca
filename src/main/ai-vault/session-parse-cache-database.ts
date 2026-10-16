@@ -17,6 +17,7 @@ import type { SessionSidecarObservation } from './session-sidecar-stat'
 export const SESSION_PARSE_CACHE_SCHEMA_VERSION = 4
 
 const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS rows(
   path TEXT PRIMARY KEY,
   mtime_ms REAL NOT NULL,

@@ -5,7 +5,8 @@ import { removeTreeSync } from '../../shared/windows-transient-lock-removal'
 
 export type VersionedCacheDatabaseSchema = {
   version: number
-  // Idempotent DDL; the `meta` table is created before it runs.
+  // Idempotent DDL, including `meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+  // which holds the schema version.
   sql: string
   // Runs inside the same rebuild-on-corruption scope as the schema.
   afterSchema?: (db: SyncDatabase) => void
@@ -59,7 +60,6 @@ function openExisting(path: string, schema: VersionedCacheDatabaseSchema): SyncD
       removeVersionedCacheDatabase(path)
       db = openWithPragmas(path, schema.pageSize)
     }
-    db.exec('CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);')
     db.exec(schema.sql)
     schema.afterSchema?.(db)
     db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)').run(

@@ -21,6 +21,7 @@ export const SESSION_SEARCH_SCHEMA_VERSION = 6
 const TOKENIZER = `tokenize="unicode61 tokenchars '_.-/+'"`
 
 const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions(
   -- AUTOINCREMENT, because this id names rows in the messages table for longer
   -- than the row itself lives: retention cuts a session loose in one
