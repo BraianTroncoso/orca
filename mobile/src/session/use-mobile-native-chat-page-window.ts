@@ -249,9 +249,12 @@ export function useMobileNativeChatPageWindow(args: {
       return
     }
     const scrolled = () => {
-      motion.scrolled(s.scrollTop)
-      takeAnchor(s)
-      cover(s)
+      // A write's event can arrive after rows above grew and before the correction: taking the place
+      // or covering then would keep the pushed position and draw the rows that pushed it.
+      if (motion.scrolled(s.scrollTop)) {
+        takeAnchor(s)
+        cover(s)
+      }
     }
     const down = () => motion.touch(true)
     const up = () => motion.touch(false)
@@ -305,10 +308,11 @@ export function useMobileNativeChatPageWindow(args: {
       const s = scroller()
       if (s && !drawn.current?.following && motion.settled()) {
         write(s, s.scrollTop + drift)
+        takeAnchor(s)
         anchorStale.current = true
       }
     },
-    [scroller, motion, write]
+    [scroller, motion, write, takeAnchor]
   )
 
   // Stable, so the list's handle (and with it the one observer) is made once.

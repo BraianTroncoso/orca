@@ -24,14 +24,16 @@ export class MobileNativeChatPageMotion {
     }
   }
 
-  scrolled(scrollTop: number): void {
+  /** True for the reader's scroll; false for the event of one of the page's own writes. */
+  scrolled(scrollTop: number): boolean {
     const at = this.own.findIndex((target) => Math.abs(target - scrollTop) <= 1)
     if (at !== -1) {
       this.own.splice(0, at + 1)
-      return
+      return false
     }
     this.lastReaderScroll = Date.now()
     this.poke()
+    return true
   }
 
   wrote(target: number): void {
