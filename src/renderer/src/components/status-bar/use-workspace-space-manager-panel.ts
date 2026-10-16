@@ -105,7 +105,7 @@ export function useWorkspaceSpaceManagerPanel() {
       }
       removeWorkspaceSpaceWorktrees(deletedTargets)
       for (const target of deletedTargets) {
-        dismissDeleteWorktreeFailureToast(target.id)
+        dismissDeleteWorktreeFailureToast(target)
       }
       void window.api.workspaceSpace.requestWorktreeRefresh?.()
       const deletedIdentities = new Set(
