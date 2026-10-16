@@ -1,11 +1,20 @@
 /** No touch and no scroll of the reader's for this long: a write any sooner can stop iOS momentum. */
 const REST_MS = 150
+/** A scroll this soon after the reader's input is theirs; without input it is layout's (a clamp,
+ *  or iOS delivering an earlier scroll after rows changed). */
+const INTENT_MS = 1_000
+
+type Listened = {
+  addEventListener: (type: string, listener: () => void, options: { passive: true }) => void
+  removeEventListener: (type: string, listener: () => void) => void
+}
 
 /** Whether the reader is moving the page, told apart from the page's own writes. Work that can move
  *  rows above the reader (a landing, a measured row, a correction) waits until it settles. */
 export class MobileNativeChatPageMotion {
   private touching = false
   private lastReaderScroll = 0
+  private lastInput = 0
   /** Where the page's own writes put the scroller, until their scroll event arrives. */
   private own: number[] = []
   private timer: ReturnType<typeof setTimeout> | undefined
@@ -13,8 +22,39 @@ export class MobileNativeChatPageMotion {
 
   constructor(private readonly onSettled: () => void) {}
 
+  /** Follows the reader's hand on the scroller; returns the detach. */
+  attach(scroller: Listened): () => void {
+    const down = () => this.touch(true)
+    const up = () => this.touch(false)
+    const input = () => {
+      this.lastInput = Date.now()
+    }
+    scroller.addEventListener('touchstart', down, { passive: true })
+    scroller.addEventListener('touchend', up, { passive: true })
+    scroller.addEventListener('touchcancel', up, { passive: true })
+    scroller.addEventListener('touchmove', input, { passive: true })
+    scroller.addEventListener('wheel', input, { passive: true })
+    scroller.addEventListener('pointerdown', input, { passive: true })
+    scroller.addEventListener('keydown', input, { passive: true })
+    return () => {
+      scroller.removeEventListener('touchstart', down)
+      scroller.removeEventListener('touchend', up)
+      scroller.removeEventListener('touchcancel', up)
+      scroller.removeEventListener('touchmove', input)
+      scroller.removeEventListener('wheel', input)
+      scroller.removeEventListener('pointerdown', input)
+      scroller.removeEventListener('keydown', input)
+    }
+  }
+
+  /** The reader's hand is on the list: touching, or input within the last second. */
+  intent(): boolean {
+    return this.touching || Date.now() - this.lastInput <= INTENT_MS
+  }
+
   touch(down: boolean): void {
     this.touching = down
+    this.lastInput = Date.now()
     if (down) {
       this.own = []
       clearTimeout(this.timer)

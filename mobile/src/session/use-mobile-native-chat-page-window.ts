@@ -256,16 +256,10 @@ export function useMobileNativeChatPageWindow(args: {
         cover(s)
       }
     }
-    const down = () => motion.touch(true)
-    const up = () => motion.touch(false)
-    s.addEventListener('touchstart', down, { passive: true })
-    s.addEventListener('touchend', up, { passive: true })
-    s.addEventListener('touchcancel', up, { passive: true })
+    const detach = motion.attach(s)
     s.addEventListener('scroll', scrolled, { passive: true })
     return () => {
-      s.removeEventListener('touchstart', down)
-      s.removeEventListener('touchend', up)
-      s.removeEventListener('touchcancel', up)
+      detach()
       s.removeEventListener('scroll', scrolled)
       clearTimeout(rescan.current)
       motion.release()
@@ -321,6 +315,7 @@ export function useMobileNativeChatPageWindow(args: {
       afterResize,
       keepInPlace,
       observeWith: drawnRows.observeWith,
+      intent: () => motion.intent(),
       settled: () => motion.whenSettled(),
       wrote: (target: number) => motion.wrote(target)
     }),

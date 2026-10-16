@@ -8,16 +8,26 @@ const scrollToEnd = vi.hoisted(() => vi.fn())
 const scrollToOffset = vi.hoisted(() => vi.fn())
 const platform = vi.hoisted(() => ({ OS: 'ios' }))
 // The page list's live DOM geometry.
-const pageScroller = vi.hoisted(() => ({
-  scrollTop: 0,
-  scrollHeight: 0,
-  clientHeight: 500,
-  clientWidth: 320,
-  getInnerViewNode: () => ({}),
-  getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
-  addEventListener: () => {},
-  removeEventListener: () => {}
-}))
+const pageScroller = vi.hoisted(() => {
+  const listeners = new Map<string, Set<() => void>>()
+  return {
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 500,
+    clientWidth: 320,
+    getInnerViewNode: () => ({}),
+    getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
+    addEventListener: (type: string, listener: () => void) => {
+      listeners.set(type, (listeners.get(type) ?? new Set()).add(listener))
+    },
+    removeEventListener: (type: string, listener: () => void) => {
+      listeners.get(type)?.delete(listener)
+    },
+    // The reader's finger on the page: down and up.
+    touch: () =>
+      ['touchstart', 'touchend'].forEach((type) => listeners.get(type)?.forEach((l) => l()))
+  }
+})
 const getScrollableNode = vi.hoisted(() => () => pageScroller)
 
 vi.mock('react-native', async () => {
@@ -671,11 +681,20 @@ describe('MobileNativeChatView', () => {
       resized()
       expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 4_900 })
 
-      // No drag event arrives on the page: the move up is all there is to go on.
+      // A move up with no touch (a clamp, or iOS delivering a scroll after rows grew) still follows.
       act(() => page().props.onScroll(scrolledTo(3_000, 5_400)))
+      resized()
+      expect(scrollToOffset).toHaveBeenCalledTimes(3)
+      act(() => page().props.onScroll(scrolledTo(4_900, 5_400)))
+
+      // The reader's touch, then a move up, leaves the end.
+      act(() => {
+        pageScroller.touch()
+        page().props.onScroll(scrolledTo(3_000, 5_400))
+      })
       pageScroller.scrollHeight = 6_000
       resized()
-      expect(scrollToOffset).toHaveBeenCalledTimes(2)
+      expect(scrollToOffset).toHaveBeenCalledTimes(3)
       expect(
         renderer!.root.findAll((node) => node.props.accessibilityLabel === 'Scroll to latest')
       ).toHaveLength(1)
@@ -715,7 +734,10 @@ describe('MobileNativeChatView', () => {
       expect(transcriptStyle()).toContainEqual({ overflowAnchor: 'none' })
 
       // Parked, the browser may anchor a message again; the jump back follows the end once more.
-      act(() => page().props.onScroll(scrolledTo(300, 1_000)))
+      act(() => {
+        pageScroller.touch()
+        page().props.onScroll(scrolledTo(300, 1_000))
+      })
       expect(transcriptStyle()).not.toContainEqual({ overflowAnchor: 'none' })
       act(() => jumps()[0]!.props.onPress())
       expect(transcriptStyle()).toContainEqual({ overflowAnchor: 'none' })

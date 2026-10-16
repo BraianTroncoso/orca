@@ -62,6 +62,8 @@ export type MobileNativeChatListHandle = {
   keepInPlace?: (drift: number) => void
   /** Page only: resolves once the reader stops moving the list, or the list goes away. */
   settled?: () => Promise<void>
+  /** Page only: the reader touched, wheeled or pressed on the list within the last second. */
+  intent?: () => boolean
 }
 
 export type MobileNativeChatTailFollow = {
@@ -216,8 +218,10 @@ export function useMobileNativeChatTailFollow(args: {
       const moved = event.contentOffset.y - pageOffsetRef.current
       pageOffsetRef.current = event.contentOffset.y
       if (followingRef.current) {
-        // A pin only moves toward the end and a clamp lands on it: up and short of it is the reader.
-        if (moved < -PAGE_MOVE_SLOP && distanceFromTail(event) > PAGE_MOVE_SLOP) {
+        // Only the reader leaves the end: a clamp, or iOS delivering a scroll after rows grew above,
+        // also reads as a move up short of it.
+        const reader = listRef.current?.intent?.() === true
+        if (reader && moved < -PAGE_MOVE_SLOP && distanceFromTail(event) > PAGE_MOVE_SLOP) {
           setFollowing(false)
         }
       } else if (moved > PAGE_MOVE_SLOP && endsAtTail) {
