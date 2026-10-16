@@ -1,4 +1,10 @@
 import { z } from 'zod'
+import { isTerminalLeafId } from '../stable-pane-id'
+import { isValidHostTerminalTabId } from '../terminal-tab-id'
+import type { TuiAgent } from '../tui-agent'
+import { isTuiAgent } from '../tui-agent-config'
+import { TerminalPaneLayoutNodeSchema } from './session-tabs-schemas-params'
+import { TerminalOrphanGroupLayout } from './terminal-orphan-params'
 
 export const LayoutSubscribeParams = z
   .object({
@@ -9,4 +15,154 @@ export const LayoutSubscribeParams = z
 
 export const LayoutUnsubscribeParams = z.object({
   subscriptionId: z.string().min(1, 'Missing subscriptionId')
+})
+
+const OnPane = {
+  workspace: z.string().min(1),
+  tabId: z.string().min(1),
+  leafId: z.string().min(1)
+}
+
+const SplitPaneCommand = z.object({
+  type: z.literal('splitPane'),
+  ...OnPane,
+  direction: z.enum(['horizontal', 'vertical'])
+})
+
+/** Main marks a close as the user's; the window cannot send that mark. */
+const ClosePaneCommand = z.object({ type: z.literal('closePane'), ...OnPane })
+
+/** A title is trimmed and non-empty; null clears it. */
+const RenamePaneCommand = z.object({
+  type: z.literal('renamePane'),
+  ...OnPane,
+  title: z.union([z.string().trim().min(1), z.null()])
+})
+
+const MovePaneCommand = z.object({
+  type: z.literal('movePane'),
+  ...OnPane,
+  targetLeafId: z.string().min(1),
+  side: z.enum(['left', 'right', 'top', 'bottom'])
+})
+
+/** The tab's tree with its new ratios; main refuses one whose panes differ from its own. */
+const SetPaneRatiosCommand = z.object({
+  type: z.literal('setPaneRatios'),
+  workspace: OnPane.workspace,
+  tabId: OnPane.tabId,
+  root: TerminalPaneLayoutNodeSchema
+})
+
+const EqualizePanesCommand = z.object({
+  type: z.literal('equalizePanes'),
+  workspace: OnPane.workspace,
+  tabId: OnPane.tabId
+})
+
+const OnTab = { workspace: OnPane.workspace, tabId: OnPane.tabId }
+
+/** Within one group too: a reorder is a move to the tab's own group. */
+const MoveTabCommand = z.object({
+  type: z.literal('moveTab'),
+  ...OnTab,
+  toGroupId: z.string().min(1),
+  index: z.number().int().nonnegative()
+})
+
+/** Main mints the new group's id, or moves a lone tab's group whole. */
+const SplitGroupCommand = z.object({
+  type: z.literal('splitGroup'),
+  ...OnTab,
+  besideGroupId: z.string().min(1),
+  direction: z.enum(['left', 'right', 'up', 'down'])
+})
+
+/** The workspace's group tree with its new ratios; main refuses one whose groups differ. */
+const SetGroupRatiosCommand = z.object({
+  type: z.literal('setGroupRatios'),
+  workspace: OnPane.workspace,
+  groupLayout: TerminalOrphanGroupLayout
+})
+
+/** The window's close of one tab it already closed; main records it, the window's reason kept. */
+const CloseTabsCommand = z.object({
+  type: z.literal('closeTabs'),
+  workspace: OnPane.workspace,
+  tabIds: z.tuple([z.string().min(1)]),
+  recordClose: z.enum(['user', 'cleanup'])
+})
+
+/** A window's drag-out of one pane into a new tab; main mints the tab's id. */
+const MovePaneToNewTabCommand = z.object({
+  type: z.literal('movePaneToNewTab'),
+  ...OnPane,
+  groupId: z.string().min(1),
+  index: z.number().int().nonnegative().optional(),
+  /** The terminal the window's pane shows now, when it has one. */
+  windowDetach: z.object({ ptyId: z.string().min(1).max(512).nullable() })
+})
+
+/**
+ * A terminal tab under the ids the window drew it with: its callers and the pane's terminal need
+ * them at once. Main refuses an id another tab holds; the same create again changes nothing.
+ */
+const CreateTerminalTabCommand = z.object({
+  type: z.literal('createTerminalTab'),
+  workspace: OnPane.workspace,
+  tabId: z.string().refine(isValidHostTerminalTabId),
+  leafId: z.string().refine(isTerminalLeafId),
+  groupId: z.string().min(1).optional(),
+  viewMode: z.enum(['terminal', 'chat']).optional(),
+  creation: z
+    .object({
+      defaultTitle: z.string().min(1).optional(),
+      shellOverride: z.string().min(1).optional(),
+      startupCwd: z.string().min(1).optional(),
+      forceHostRuntime: z.literal(true).optional(),
+      launchAgent: z
+        .custom<TuiAgent>((value) => typeof value === 'string' && isTuiAgent(value))
+        .optional()
+    })
+    .optional(),
+  /** Only into a workspace with no tab in main's copy; otherwise nothing is created. */
+  initial: z.literal('activation').optional()
+})
+
+/** The tab bar's rename: a title as the window stores it today; null clears it. */
+const RenameTabCommand = z.object({
+  type: z.literal('renameTab'),
+  ...OnTab,
+  kind: z.literal('custom'),
+  title: z.union([z.string(), z.null()])
+})
+
+const SetTabPropsCommand = z.object({
+  type: z.literal('setTabProps'),
+  ...OnTab,
+  color: z.union([z.string(), z.null()]).optional(),
+  isPinned: z.boolean().optional()
+})
+
+/**
+ * A window's layout command (`layout.apply`, registered only in a layout-owner build). The window
+ * names what it acts on; main mints every new id but a created tab's (see CreateTerminalTabCommand).
+ */
+export const LayoutApplyParams = z.object({
+  command: z.discriminatedUnion('type', [
+    CreateTerminalTabCommand,
+    SplitPaneCommand,
+    ClosePaneCommand,
+    RenamePaneCommand,
+    EqualizePanesCommand,
+    MovePaneCommand,
+    SetPaneRatiosCommand,
+    MoveTabCommand,
+    SplitGroupCommand,
+    SetGroupRatiosCommand,
+    CloseTabsCommand,
+    RenameTabCommand,
+    SetTabPropsCommand,
+    MovePaneToNewTabCommand
+  ])
 })

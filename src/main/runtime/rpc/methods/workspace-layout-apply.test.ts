@@ -1,0 +1,288 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { WorkspaceSessionState } from '../../../../shared/workspace-session-state-types'
+import { RUNTIME_CAPABILITIES } from '../../../../shared/protocol-version'
+import { MOBILE_RPC_METHOD_ALLOWLIST } from '../../runtime-rpc/runtime-rpc-mobile-method-allowlist'
+import { OrcaRuntimeService } from '../../orca-runtime'
+import { eraseRpcMethods, isStreamingMethod, type RpcContext } from '../core'
+
+const WORKTREE = 'repo-1::/work/one'
+const SPLIT = {
+  type: 'splitPane',
+  workspace: WORKTREE,
+  tabId: 'tab-1',
+  leafId: 'leaf-1',
+  direction: 'vertical'
+} as const
+
+async function registeredMethods(layoutOwnerIsMain: boolean) {
+  vi.resetModules()
+  vi.doMock('../../../../shared/layout-owner-switch', () => ({
+    ORCA_LAYOUT_OWNER_IS_MAIN: layoutOwnerIsMain
+  }))
+  const { ALL_RPC_METHODS } = await import('./index')
+  return eraseRpcMethods(ALL_RPC_METHODS)
+}
+
+function sessionListing(tabId: string): WorkspaceSessionState {
+  return {
+    activeRepoId: null,
+    activeWorktreeId: WORKTREE,
+    activeTabId: tabId,
+    tabsByWorktree: {
+      [WORKTREE]: [
+        {
+          id: tabId,
+          ptyId: null,
+          worktreeId: WORKTREE,
+          title: 'Terminal',
+          customTitle: null,
+          color: null,
+          sortOrder: 0,
+          createdAt: 1
+        }
+      ]
+    },
+    terminalLayoutsByTabId: {}
+  }
+}
+
+function runtimeHolding(hostId: string) {
+  const applyLayoutCommand = vi.fn(async () => ({ ok: true, result: { leafId: 'minted' } }))
+  const empty: WorkspaceSessionState = { ...sessionListing('other'), tabsByWorktree: {} }
+  const store = {
+    getRepo: () => undefined,
+    getWorkspaceSessionHostIds: () => ['local', hostId],
+    getWorkspaceSession: (host: string) => (host === hostId ? sessionListing('tab-1') : empty),
+    applyLayoutCommand
+  }
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the apply path reads only these store methods.
+  return { runtime: new OrcaRuntimeService(store as never), applyLayoutCommand }
+}
+
+afterEach(() => {
+  vi.doUnmock('../../../../shared/layout-owner-switch')
+  vi.resetModules()
+})
+
+describe('layout.apply', () => {
+  it('is not registered in a window-owned build, and never advertised or open to phones', async () => {
+    const methods = await registeredMethods(false)
+
+    expect(methods.some((method) => method.name === 'layout.apply')).toBe(false)
+    expect(RUNTIME_CAPABILITIES.some((capability) => capability.startsWith('layout'))).toBe(false)
+    expect(MOBILE_RPC_METHOD_ALLOWLIST.has('layout.apply')).toBe(false)
+  })
+
+  it('is registered in a layout-owner build and accepts no id main should mint', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    if (!apply || isStreamingMethod(apply)) {
+      throw new Error('layout.apply is not a request method')
+    }
+    const applyLayoutCommand = vi.fn(async () => ({ ok: true, result: {} }))
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the handler calls only applyLayoutCommand.
+    const runtime = { applyLayoutCommand } as unknown as OrcaRuntimeService
+
+    const params = apply.params?.parse({ command: { ...SPLIT, newLeafId: 'window-minted' } })
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the handler reads only runtime from its context.
+    await apply.handler(params, { runtime } as RpcContext)
+
+    expect(applyLayoutCommand).toHaveBeenCalledWith(SPLIT)
+  })
+
+  it('takes no close semantics or blank title from the window', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const pane = { workspace: WORKTREE, tabId: 'tab-1', leafId: 'leaf-1' }
+
+    expect(
+      apply?.params?.parse({
+        command: { type: 'closePane', ...pane, userPaneClose: true }
+      })
+    ).toEqual({ command: { type: 'closePane', ...pane } })
+    expect(
+      apply?.params?.safeParse({ command: { type: 'renamePane', ...pane, title: '  ' } }).success
+    ).toBe(false)
+    expect(
+      apply?.params?.parse({ command: { type: 'renamePane', ...pane, title: ' Build ' } })
+    ).toEqual({ command: { type: 'renamePane', ...pane, title: 'Build' } })
+  })
+
+  it('accepts only a drop side and a valid pane tree for gestures', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const pane = { workspace: WORKTREE, tabId: 'tab-1', leafId: 'leaf-1' }
+    const move = { type: 'movePane', ...pane, targetLeafId: 'leaf-2' }
+    const ratios = { type: 'setPaneRatios', workspace: WORKTREE, tabId: 'tab-1' }
+
+    expect(apply?.params?.safeParse({ command: { ...move, side: 'left' } }).success).toBe(true)
+    expect(apply?.params?.safeParse({ command: { ...move, side: 'center' } }).success).toBe(false)
+    expect(
+      apply?.params?.safeParse({
+        command: { ...ratios, root: { type: 'split', direction: 'vertical', ratio: 2 } }
+      }).success
+    ).toBe(false)
+  })
+
+  it('accepts tab moves and group sizes, but no group id from the window', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const tab = { workspace: WORKTREE, tabId: 'tab-1' }
+    const parse = (command: Record<string, unknown>) => apply?.params?.safeParse({ command })
+
+    expect(parse({ type: 'moveTab', ...tab, toGroupId: 'g1', index: 0 })?.success).toBe(true)
+    expect(parse({ type: 'moveTab', ...tab, toGroupId: 'g1', index: -1 })?.success).toBe(false)
+    expect(
+      apply?.params?.parse({
+        command: {
+          type: 'splitGroup',
+          ...tab,
+          besideGroupId: 'g1',
+          direction: 'left',
+          newGroupId: 'window-minted'
+        }
+      })
+    ).toEqual({
+      command: { type: 'splitGroup', ...tab, besideGroupId: 'g1', direction: 'left' }
+    })
+    expect(
+      parse({ type: 'splitGroup', ...tab, besideGroupId: 'g1', direction: 'center' })?.success
+    ).toBe(false)
+    const split = {
+      type: 'split',
+      direction: 'horizontal',
+      first: { type: 'leaf', groupId: 'g1' },
+      second: { type: 'leaf', groupId: 'g2' }
+    }
+    expect(
+      parse({ type: 'setGroupRatios', workspace: WORKTREE, groupLayout: { ...split, ratio: 0.3 } })
+        ?.success
+    ).toBe(true)
+    expect(
+      parse({ type: 'setGroupRatios', workspace: WORKTREE, groupLayout: { ...split, ratio: 3 } })
+        ?.success
+    ).toBe(false)
+  })
+
+  it('accepts the close of one tab with the window’s reason, but no force or refusals', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const close = { type: 'closeTabs', workspace: WORKTREE, recordClose: 'user' }
+
+    expect(
+      apply?.params?.parse({
+        command: { ...close, tabIds: ['tab-1'], force: false, refusePinned: true }
+      })
+    ).toEqual({ command: { ...close, tabIds: ['tab-1'] } })
+    expect(apply?.params?.safeParse({ command: { ...close, tabIds: ['a', 'b'] } }).success).toBe(
+      false
+    )
+    expect(
+      apply?.params?.safeParse({ command: { ...close, tabIds: ['a'], recordClose: 'pty-exit' } })
+        .success
+    ).toBe(false)
+  })
+
+  it('accepts a drag-out with the window’s terminal, but no tab id from the window', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const move = {
+      type: 'movePaneToNewTab',
+      workspace: WORKTREE,
+      tabId: 'tab-1',
+      leafId: 'leaf-1',
+      groupId: 'g1',
+      index: 2
+    }
+
+    expect(
+      apply?.params?.parse({ command: { ...move, windowDetach: { ptyId: 'pty-1', tabId: 'x' } } })
+    ).toEqual({ command: { ...move, windowDetach: { ptyId: 'pty-1' } } })
+    expect(apply?.params?.safeParse({ command: { ...move, windowDetach: {} } }).success).toBe(false)
+    expect(
+      apply?.params?.safeParse({ command: { ...move, windowDetach: { ptyId: null }, index: -1 } })
+        .success
+    ).toBe(false)
+  })
+
+  it('applies group sizes to the workspace’s routed partition', async () => {
+    const { runtime, applyLayoutCommand } = runtimeHolding('ssh:target-1')
+    const ratios = {
+      type: 'setGroupRatios',
+      workspace: WORKTREE,
+      groupLayout: { type: 'leaf', groupId: 'g1' }
+    } as const
+
+    await runtime.applyLayoutCommand(ratios)
+
+    expect(applyLayoutCommand).toHaveBeenCalledWith(ratios, ['local'])
+  })
+
+  it('takes a terminal tab create under valid window ids, and only an activation initial', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const create = {
+      type: 'createTerminalTab',
+      workspace: WORKTREE,
+      tabId: 'tab-2',
+      leafId: '22222222-2222-4222-8222-222222222222'
+    }
+    const accepts = (command: Record<string, unknown>): boolean | undefined =>
+      apply?.params?.safeParse({ command }).success
+
+    expect(
+      apply?.params?.parse({
+        command: { ...create, creation: { launchAgent: 'claude', startupCwd: '/work' }, index: 0 }
+      })
+    ).toEqual({ command: { ...create, creation: { launchAgent: 'claude', startupCwd: '/work' } } })
+    expect(accepts({ ...create, initial: 'activation' })).toBe(true)
+    expect(accepts({ ...create, initial: 'restore' })).toBe(false)
+    expect(accepts({ ...create, tabId: 'web:surface' })).toBe(false)
+    expect(accepts({ ...create, leafId: 'leaf-2' })).toBe(false)
+    expect(accepts({ ...create, creation: { launchAgent: 'not-an-agent' } })).toBe(false)
+  })
+
+  it('creates a new tab in the workspace’s own partition', async () => {
+    const { runtime, applyLayoutCommand } = runtimeHolding('ssh:target-1')
+    const create = {
+      type: 'createTerminalTab',
+      workspace: WORKTREE,
+      tabId: 'tab-new',
+      leafId: '22222222-2222-4222-8222-222222222222'
+    } as const
+
+    await runtime.applyLayoutCommand(create)
+
+    expect(applyLayoutCommand).toHaveBeenCalledWith(create, ['local'])
+  })
+
+  it('takes a tab’s custom title, color and pin, and no other tab kind or property', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const tab = { workspace: WORKTREE, tabId: 'tab-1' }
+    const parses = (command: Record<string, unknown>) =>
+      apply?.params?.safeParse({ command: { ...tab, ...command } }).success
+
+    expect(parses({ type: 'renameTab', kind: 'custom', title: ' Build ' })).toBe(true)
+    expect(parses({ type: 'renameTab', kind: 'custom', title: null })).toBe(true)
+    expect(parses({ type: 'renameTab', kind: 'generated', title: 'x' })).toBe(false)
+    expect(parses({ type: 'setTabProps', color: '#f00', isPinned: true })).toBe(true)
+    expect(parses({ type: 'setTabProps', color: null })).toBe(true)
+    expect(parses({ type: 'setTabProps', isPinned: 'yes' })).toBe(false)
+    expect(
+      apply?.params?.parse({ command: { ...tab, type: 'setTabProps', viewMode: 'chat' } })
+    ).toEqual({ command: { ...tab, type: 'setTabProps' } })
+  })
+
+  it('applies to the partition that holds the tab, such as an SSH host’s', async () => {
+    const { runtime, applyLayoutCommand } = runtimeHolding('ssh:target-1')
+
+    await expect(runtime.applyLayoutCommand(SPLIT)).resolves.toEqual({
+      ok: true,
+      result: { leafId: 'minted' }
+    })
+    expect(applyLayoutCommand).toHaveBeenCalledWith(SPLIT, ['ssh:target-1'])
+  })
+
+  it('refuses a paired server’s workspace, which keeps its mirrored layout', async () => {
+    const { runtime, applyLayoutCommand } = runtimeHolding('runtime:env-1')
+
+    await expect(runtime.applyLayoutCommand(SPLIT)).resolves.toEqual({
+      ok: false,
+      code: 'host_not_owned'
+    })
+    expect(applyLayoutCommand).not.toHaveBeenCalled()
+  })
+})

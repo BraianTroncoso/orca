@@ -127,12 +127,26 @@ async function doConnect(
     }
     // COMPAT(legacy-relay-bridge): panes an older relay still runs are known before the host is.
     await startLegacyRelayBridge(targetId)
-    return publishManagedServerConnect(
+    // A disconnect or shutdown during the bridge wait already published; "connected" would be stale.
+    assertSshConnectsNotFenced()
+    if (!isCurrentConnectAttempt(targetId, authority)) {
+      await abandonDecisionTransport(targetId, owner, authority)
+      throw createCancelledConnectAttemptError()
+    }
+    const published = publishManagedServerConnect(
       targetId,
       server.environmentId,
       server.update,
-      server.serving
+      server.serving,
+      server.linked
     )
+    // Why after publishing: the check costs round trips, and only a macOS host shows a result.
+    void import('./ssh-host-launch-session-note')
+      .then(({ noteEndedLaunchSshSession }) =>
+        noteEndedLaunchSshSession(targetId, server.environmentId)
+      )
+      .catch(() => {})
+    return published
   }
   // This version has no relay to fall back to: a host its managed server doesn't serve fails here.
   await abandonDecisionTransport(targetId, owner, authority)

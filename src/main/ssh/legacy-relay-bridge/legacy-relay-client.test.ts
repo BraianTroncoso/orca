@@ -31,9 +31,16 @@ vi.mock('../ssh-channel-multiplexer', () => ({
         emit: (method, params) => this.notificationHandlers.forEach((h) => h(method, params))
       })
     }
-    async request(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    async request(
+      method: string,
+      params?: Record<string, unknown>,
+      options?: { beforeResolve?: (result: unknown) => void }
+    ): Promise<unknown> {
       fake.requests.push({ method, params })
-      return fake.respond(method, params)
+      const result = fake.respond(method, params)
+      // Like the real multiplexer: runs as the reply is read, before later frames route.
+      options?.beforeResolve?.(result)
+      return result
     }
     notify(method: string, params?: Record<string, unknown>): void {
       fake.notifications.push({ method, params })
@@ -195,6 +202,16 @@ describe('the legacy relay client', () => {
     fake.instances[0].emit('pty.exit', { id: 'pty-1', code: 0 })
     expect(data).toEqual(['pty-1:out'])
     expect(exits).toEqual([0])
+  })
+
+  it('hands an attach’s screen over at the reply, before the call resolves', async () => {
+    const client = await open()
+    fake.respond = () => ({ incarnationId: 'i', replay: 'SCREEN' })
+    const order: string[] = []
+    const attached = client.attach('pty-1', (replay) => order.push(`snapshot:${replay}`))
+    order.push('returned')
+    await attached
+    expect(order).toEqual(['snapshot:SCREEN', 'returned'])
   })
 
   it('answers an orca command from an old terminal with why it is unavailable', async () => {

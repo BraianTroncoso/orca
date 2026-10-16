@@ -119,7 +119,12 @@ describe('sleepingRecordNamesAnotherExecutionHost', () => {
       // yours is the inverse of the defect and worse.
       const record = makeRecord({ connectionId })
       expect(
-        sleepingRecordNamesAnotherExecutionHost(record, { repos: [], worktreesByRepo: {} })
+        sleepingRecordNamesAnotherExecutionHost(record, {
+          repos: [],
+          worktreesByRepo: {},
+          settings: { activeRuntimeEnvironmentId: 'unrelated' },
+          runtimeEnvironments: [{ id: 'unrelated' }]
+        })
       ).toBe(false)
     }
   )
@@ -129,7 +134,9 @@ describe('sleepingRecordNamesAnotherExecutionHost', () => {
     expect(
       sleepingRecordNamesAnotherExecutionHost(record, {
         repos: [{ id: 'repo-1' }],
-        worktreesByRepo: {}
+        worktreesByRepo: {},
+        settings: { activeRuntimeEnvironmentId: 'unrelated' },
+        runtimeEnvironments: [{ id: 'unrelated' }]
       })
     ).toBe(true)
   })
@@ -242,3 +249,131 @@ describe('the resume sweep under execution-host scope', () => {
     expect(state.sleepingAgentSessionsByPaneKey[native.paneKey]).toBeUndefined()
   })
 })
+
+const ownerEvidenceCases: {
+  name: string
+  state: WorktreeRuntimeOwnerState
+  connectionId: string | null
+  worktreeId?: string
+  foreign: boolean
+}[] = [
+  {
+    name: 'the active local host over an SSH catalog',
+    state: {
+      ...catalogOwnedBy('ssh:openclaw'),
+      activeWorktreeId: WORKTREE_ID,
+      activeWorkspaceExecutionHostId: 'local'
+    },
+    connectionId: TARGET_ID,
+    foreign: true
+  },
+  {
+    name: 'the matching active SSH host over a local catalog',
+    state: {
+      ...catalogOwnedBy('local'),
+      activeWorktreeId: WORKTREE_ID,
+      activeWorkspaceExecutionHostId: 'ssh:openclaw'
+    },
+    connectionId: TARGET_ID,
+    foreign: false
+  },
+  {
+    name: 'a foreign detected-only SSH owner',
+    state: {
+      detectedWorktreesByRepo: {
+        remote: { worktrees: [{ id: WORKTREE_ID, repoId: 'remote', hostId: 'ssh:other' }] }
+      }
+    },
+    connectionId: TARGET_ID,
+    foreign: true
+  },
+  {
+    name: 'conflicting detected owners',
+    state: {
+      detectedWorktreesByRepo: {
+        a: { worktrees: [{ id: WORKTREE_ID, repoId: 'a', hostId: 'ssh:other' }] },
+        b: { worktrees: [{ id: WORKTREE_ID, repoId: 'b', hostId: 'local' }] }
+      }
+    },
+    connectionId: TARGET_ID,
+    foreign: false
+  },
+  ...[TARGET_ID, 'other'].map((connectionId) => ({
+    name: `physical SSH ownership through a runtime for ${connectionId}`,
+    state: {
+      repos: [{ id: 'repo-1', connectionId: TARGET_ID, executionHostId: 'runtime:hub' as const }],
+      worktreesByRepo: {
+        'repo-1': [{ id: WORKTREE_ID, repoId: 'repo-1', hostId: 'ssh:openclaw' as const }]
+      }
+    },
+    connectionId,
+    foreign: connectionId !== TARGET_ID
+  })),
+  {
+    name: 'a direct SSH folder for a locally captured session',
+    worktreeId: 'folder:f',
+    state: { folderWorkspaces: [{ id: 'f', projectGroupId: 'g', connectionId: TARGET_ID }] },
+    connectionId: null,
+    foreign: true
+  },
+  {
+    name: 'a known unstamped local folder',
+    worktreeId: 'folder:f',
+    state: { folderWorkspaces: [{ id: 'f', projectGroupId: 'g' }] },
+    connectionId: TARGET_ID,
+    foreign: true
+  },
+  {
+    name: 'a restored runtime folder before its catalog',
+    worktreeId: 'folder:f',
+    state: { restoredRuntimeHostIdByWorkspaceSessionKey: { 'folder:f': 'runtime:restored' } },
+    connectionId: TARGET_ID,
+    foreign: false
+  },
+  {
+    name: 'a missing folder',
+    worktreeId: 'folder:f',
+    state: {},
+    connectionId: TARGET_ID,
+    foreign: false
+  },
+  {
+    name: 'conflicting folder owners',
+    worktreeId: 'folder:f',
+    state: {
+      folderWorkspaces: [
+        { id: 'f', projectGroupId: 'g', executionHostId: 'local' },
+        { id: 'f', projectGroupId: 'g', executionHostId: 'ssh:other' }
+      ]
+    },
+    connectionId: TARGET_ID,
+    foreign: false
+  },
+  {
+    name: 'conflicting inherited folder group owners',
+    worktreeId: 'folder:f',
+    state: {
+      folderWorkspaces: [{ id: 'f', projectGroupId: 'g' }],
+      projectGroups: [
+        { id: 'g', executionHostId: 'local' },
+        { id: 'g', executionHostId: 'ssh:other' }
+      ]
+    },
+    connectionId: TARGET_ID,
+    foreign: false
+  }
+]
+
+it.each(ownerEvidenceCases)(
+  'compares capture against $name',
+  ({ state, connectionId, worktreeId, foreign }) => {
+    const record = makeRecord({ connectionId, ...(worktreeId ? { worktreeId } : {}) })
+    expect(
+      sleepingRecordNamesAnotherExecutionHost(record, {
+        settings: { activeRuntimeEnvironmentId: 'unrelated' },
+        runtimeEnvironments: [{ id: 'unrelated' }],
+        ...state
+      })
+    ).toBe(foreign)
+  }
+)

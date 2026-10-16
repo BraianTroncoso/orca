@@ -16,6 +16,16 @@ import type { LayoutEditorFile, LayoutTerminalCreation } from './workspace-layou
 
 type On = { workspace: string }
 
+/**
+ * The desktop's drag-out rules: the terminal the window's pane shows outranks a stale binding
+ * here, and a tab's last pane moves too (the window holds siblings this copy lacks).
+ */
+export type WindowPaneDetach = {
+  ptyId: string | null
+  /** The new tab's id, the same in every partition holding the pane; minted when absent. */
+  tabId?: string
+}
+
 export type LayoutCommand =
   | (On & {
       type: 'createTerminalTab'
@@ -40,7 +50,16 @@ export type LayoutCommand =
       /** The new pane's id, when the runtime minted it before applying. */
       newLeafId?: string
     })
-  | (On & { type: 'closePane'; tabId: string; leafId: string })
+  | (On & {
+      type: 'closePane'
+      tabId: string
+      leafId: string
+      /**
+       * A user's close of one pane of a split, as the desktop's pane close: the tab's last pane is
+       * refused (closing it is a tab close).
+       */
+      userPaneClose?: true
+    })
   | (On & {
       type: 'closeTabs'
       tabIds: string[]
@@ -49,6 +68,11 @@ export type LayoutCommand =
       refusePinned?: boolean
       /** Editor tabs whose view reported an unsaved draft (rule 10). */
       dirtyTabIds?: string[]
+      /**
+       * Records each terminal tab closed, or not listed, as closed for this reason, so a start
+       * that commits later is refused. Main sets it on a window's close.
+       */
+      recordClose?: 'user' | 'cleanup'
     })
   | (On & { type: 'moveTab'; tabId: string; toGroupId: string; index: number })
   | (On & { type: 'splitGroup'; tabId: string; besideGroupId: string; direction: GroupSide })
@@ -62,6 +86,8 @@ export type LayoutCommand =
       leafId: string
       groupId?: string
       index?: number
+      /** A window's drag-out, under the desktop's move rules (WindowPaneDetach). */
+      windowDetach?: WindowPaneDetach
     })
   | (On & { type: 'renameTab'; tabId: string } & TabTitle)
   | (On & { type: 'renamePane'; tabId: string; leafId: string; title: string | null })
@@ -136,6 +162,10 @@ export type LayoutRefusalCode =
   | 'pane_sleeping'
   | 'pane_already_bound'
   | 'workspace_exists'
+  | 'tab_exists'
+  /** A window's drag-out: another tab holds the pane, or no copy binds the window's terminal. */
+  | 'pane_in_other_tab'
+  | 'pty_mismatch'
 
 /** What the runtime does after applying: stop or start terminals. The reply never waits on them. */
 export type LayoutEffects = { stopPtyIds: string[]; startPaneKeys: string[] }
@@ -146,6 +176,8 @@ export type LayoutCommandResult = {
   paneKey?: string
   groupId?: string
   pageId?: string
+  /** A window's drag-out: the terminal the moved pane shows, null when unbound. */
+  ptyId?: string | null
   tabClosed?: boolean
   alreadyClosed?: boolean
   closed?: string[]
@@ -155,6 +187,14 @@ export type LayoutCommandResult = {
   /** Old tab-bar id → new, for tabs a file rename re-ided; views move their selection with it. */
   renamedTabIds?: Record<string, string>
 }
+
+/** A command applied to a stored layout: its result, or why it changed nothing. */
+export type LayoutApplyOutcome =
+  | { ok: true; result: LayoutCommandResult }
+  | { ok: false; code: LayoutRefusalCode }
+
+/** `layout.apply`'s reply. `host_not_owned`: a paired server owns that workspace's layout. */
+export type LayoutApplyReply = LayoutApplyOutcome | { ok: false; code: 'host_not_owned' }
 
 export type LayoutContext = {
   mintId: () => string

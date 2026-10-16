@@ -9,9 +9,11 @@ const bridge = vi.hoisted(() => ({
   write: vi.fn(),
   resize: vi.fn(),
   detach: vi.fn(),
+  setOutputPaused: vi.fn(),
   listPanes: vi.fn(async (): Promise<LegacyRelayBridgedPane[]> => []),
   panes: new Set<(panes: LegacyRelayBridgedPane[]) => void>(),
   data: new Set<(event: { ptyId: string; data: string }) => void>(),
+  replay: new Set<(event: { ptyId: string; replay: string }) => void>(),
   exit: new Set<(event: { ptyId: string; code: number }) => void>()
 }))
 
@@ -23,6 +25,7 @@ vi.stubGlobal('window', {
       write: bridge.write,
       resize: bridge.resize,
       detach: bridge.detach,
+      setOutputPaused: bridge.setOutputPaused,
       onPanes: (listener: (panes: LegacyRelayBridgedPane[]) => void) => {
         bridge.panes.add(listener)
         return () => bridge.panes.delete(listener)
@@ -30,6 +33,10 @@ vi.stubGlobal('window', {
       onData: (listener: (event: { ptyId: string; data: string }) => void) => {
         bridge.data.add(listener)
         return () => bridge.data.delete(listener)
+      },
+      onReplay: (listener: (event: { ptyId: string; replay: string }) => void) => {
+        bridge.replay.add(listener)
+        return () => bridge.replay.delete(listener)
       },
       onExit: (listener: (event: { ptyId: string; code: number }) => void) => {
         bridge.exit.add(listener)
@@ -165,6 +172,23 @@ describe('a runtime pane bridged to an older relay’s terminal', () => {
     expect(cb.onExit).toHaveBeenCalledWith(0)
     expect(bridge.detach).toHaveBeenCalledWith({ ptyId: PTY })
     expect(inner.connect).not.toHaveBeenCalled()
+  })
+
+  it('asks main to hold a hidden pane’s output, and repaints from the screen main re-read', async () => {
+    bridge.attach.mockResolvedValueOnce({ status: 'attached', replay: 'SCREEN' })
+    const inner = innerTransport()
+    inner.setOutputPaused = vi.fn(() => true)
+    const transport = createLegacyRelayBridgeTransport(PTY, inner)
+    const cb = callbacks()
+    await transport.connect({ url: '', sessionId: PTY, callbacks: cb })
+    expect(transport.setOutputPaused?.(true)).toBe(true)
+    expect(bridge.setOutputPaused).toHaveBeenLastCalledWith({ ptyId: PTY, paused: true })
+    transport.setOutputPaused?.(false)
+    expect(bridge.setOutputPaused).toHaveBeenLastCalledWith({ ptyId: PTY, paused: false })
+    bridge.replay.forEach((listener) => listener({ ptyId: 'ssh:ssh-box@@pty-2', replay: 'OTHER' }))
+    bridge.replay.forEach((listener) => listener({ ptyId: PTY, replay: 'FRESH' }))
+    expect(cb.onReplayData.mock.calls).toEqual([['FRESH', { clearBeforeReplay: true }]])
+    expect(inner.setOutputPaused).not.toHaveBeenCalled()
   })
 
   it('reports a terminal the relay no longer runs as an expired session, then spawns on orcad', async () => {

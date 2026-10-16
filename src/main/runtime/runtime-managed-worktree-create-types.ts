@@ -42,6 +42,9 @@ export type RuntimeManagedWorktreeCreateArgs = {
   telemetrySource?: WorkspaceCreateTelemetrySource
   workspaceStatus?: string
   manualOrder?: number
+  nestWorkspaces?: boolean
+  refreshLocalBaseRefOnWorktreeCreate?: boolean
+  localBaseRefSuggestionDismissed?: boolean
   sparseCheckout?: { directories: string[]; presetId?: string }
   pushTarget?: GitPushTarget
   runHooks?: boolean
@@ -51,7 +54,12 @@ export type RuntimeManagedWorktreeCreateArgs = {
   awaitTerminalProvisioning?: boolean
   observeSetupCompletion?: boolean
   createdWithAgent?: TuiAgent
+  /** Transient intent: this create will be followed by an agent chat surface. */
+  promisedAgentChat?: boolean
+  /** Main-internal launch registration before catalog notification or activation. */
+  onWorkspaceCreated?: (worktreeId: string) => void
   startupAgent?: TuiAgent
+  terminalImageViewerSupported?: boolean
   startupLaunchPreferences?: AgentLaunchPreferences
   startupPrompt?: string
   /** Main-internal: set by a caller that delivers an uncarried `startupPrompt` itself, so the text

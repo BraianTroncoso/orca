@@ -16,6 +16,7 @@ import {
   installLegacyRelayBridge,
   legacyRelayBridgedPanes,
   resizeLegacyRelayPane,
+  setLegacyRelayPaneOutputPaused,
   terminalsBucket,
   writeLegacyRelayPane
 } from './legacy-relay-bridge-registry'
@@ -24,6 +25,7 @@ const PtyIdSchema = z.string().min(1).max(4096)
 const SizeSchema = z.number().int().positive().max(10_000)
 const PaneArgsSchema = z.object({ ptyId: PtyIdSchema })
 const WriteArgsSchema = z.object({ ptyId: PtyIdSchema, data: z.string() })
+const PausedArgsSchema = z.object({ ptyId: PtyIdSchema, paused: z.boolean() })
 const ResizeArgsSchema = z.object({ ptyId: PtyIdSchema, cols: SizeSchema, rows: SizeSchema })
 
 export function registerLegacyRelayBridgeIpc(args: {
@@ -44,6 +46,7 @@ export function registerLegacyRelayBridgeIpc(args: {
     connection: args.connection,
     onPanesChanged: (panes) => send(CHANNELS.panes, panes),
     onData: (ptyId, data) => send(CHANNELS.data, { ptyId, data }),
+    onReplay: (ptyId, replay) => send(CHANNELS.replay, { ptyId, replay }),
     onExit: (ptyId, code) => send(CHANNELS.exit, { ptyId, code }),
     report: (targetId, phase, terminals) => {
       try {
@@ -59,7 +62,12 @@ export function registerLegacyRelayBridgeIpc(args: {
   })
   ipcMain.removeHandler(CHANNELS.listPanes)
   ipcMain.removeHandler(CHANNELS.attach)
-  for (const channel of [CHANNELS.write, CHANNELS.resize, CHANNELS.detach]) {
+  for (const channel of [
+    CHANNELS.write,
+    CHANNELS.resize,
+    CHANNELS.setOutputPaused,
+    CHANNELS.detach
+  ]) {
     ipcMain.removeAllListeners(channel)
   }
   ipcMain.handle(CHANNELS.listPanes, () => legacyRelayBridgedPanes())
@@ -77,6 +85,12 @@ export function registerLegacyRelayBridgeIpc(args: {
     const args = ResizeArgsSchema.safeParse(payload)
     if (args.success) {
       resizeLegacyRelayPane(args.data.ptyId, args.data.cols, args.data.rows)
+    }
+  })
+  ipcMain.on(CHANNELS.setOutputPaused, (_event, payload: unknown) => {
+    const args = PausedArgsSchema.safeParse(payload)
+    if (args.success) {
+      setLegacyRelayPaneOutputPaused(args.data.ptyId, args.data.paused)
     }
   })
   ipcMain.on(CHANNELS.detach, (_event, payload: unknown) => {
