@@ -185,6 +185,7 @@ export abstract class OrcaRuntimeWithCreateAgentSession extends OrcaRuntimeWithG
           launchPreferences: request.launchPreferences,
           // Why outside both fingerprints: the desktop re-prepares it per attempt; the first spawn wins.
           accountEnv: request.accountEnv,
+          terminalImageViewerSupported: caller.terminalImageViewerSupported,
           terminalKittyKeyboardProtocol: request.terminalKittyKeyboardProtocol,
           cwd: startupCwd,
           presentation: request.presentation ?? 'background',
