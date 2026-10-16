@@ -157,7 +157,8 @@ export function useMobileNativeChatPageWindow(args: {
       const [at, cur] = [drawn.current, w.current]
       const firstNode = at && drawnRows.node(at.keys[at.start])
       // Before the observer reports every drawn row, a guess would move the window off the reader.
-      const unmeasured = at && at.keys.slice(at.start, at.end).some((key) => heights.px(key) === undefined)
+      const unmeasured =
+        at && at.keys.slice(at.start, at.end).some((key) => heights.px(key) === undefined)
       if (!at || !cur || !firstNode || unmeasured) {
         return
       }
