@@ -242,7 +242,8 @@ export function normalizeCodexEvent(
 
   if (eventName === 'Stop' && !hasCodexTranscriptSubagents(state, paneKey)) {
     // Why: Codex CLI 0.144 can omit child Stop hooks; later child activity safely recreates any agent still running.
-    state.codexSubagentRosterByPaneKey.delete(paneKey)
+    // Cleared, not deleted, so a reconcile cannot re-seed retired children from the previous row.
+    getOrCreateCodexSubagentRoster(state, paneKey).clear()
   }
   // Why: resolved after the transcript reconcile above, so this turn's reviewer is read from the
   // rollout during the very PermissionRequest being classified, not from a prior event.
@@ -254,13 +255,22 @@ export function normalizeCodexEvent(
     stateName
   )
   const previousLead = state.codexLeadStateByPaneKey.get(paneKey)
+  const transcript = state.codexSubagentTranscriptByPaneKey.get(paneKey)
   const turnId = readString(hookPayload, 'turn_id')
   // Why: Codex fires no Stop for a failed turn, so a Stop for one is the rollout's end replayed.
   const failedTurn =
     eventName === 'Stop' &&
     previousLead?.state !== 'done' &&
     turnId !== undefined &&
-    codexTranscriptTurnEnd(state.codexSubagentTranscriptByPaneKey.get(paneKey), turnId) === 'failed'
+    codexTranscriptTurnEnd(transcript, turnId) === 'failed'
+  // Why: a compaction inside a running turn keeps that turn; one queued before the next turn follows an ended one.
+  const startsTurn =
+    eventName === 'UserPromptSubmit' ||
+    (eventName === 'SessionStart' &&
+      (readString(hookPayload, 'source') !== 'compact' ||
+        previousLead?.state === 'done' ||
+        !previousLead?.turnId ||
+        codexTranscriptTurnEnd(transcript, previousLead.turnId) !== undefined))
   const record = setCodexMainAgentTurnState(state, paneKey, {
     state: ownedState,
     ...(failedTurn
@@ -270,13 +280,7 @@ export function normalizeCodexEvent(
       normalizeOptionalField(hookPayload['model'], AGENT_MODEL_MAX_LENGTH) ??
       (eventName === 'SessionStart' ? undefined : previousLead?.model),
     sessionId: readString(hookPayload, 'session_id'),
-    // Why: only compaction restarts a session inside the running turn; any other start or prompt begins a new one.
-    turnId:
-      turnId ??
-      (eventName === 'UserPromptSubmit' ||
-      (eventName === 'SessionStart' && readString(hookPayload, 'source') !== 'compact')
-        ? null
-        : undefined)
+    turnId: turnId ?? (startsTurn ? null : undefined)
   })
   return buildCodexStatusPayload(state, eventName, promptText, paneKey, hookPayload, {
     ...resolveCodexPaneStatus(state, paneKey, record),

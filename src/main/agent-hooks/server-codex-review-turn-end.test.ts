@@ -9,6 +9,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { RelayAgentHookServer } from '../../wsl-guest/agent-hook-server'
 import { AgentHookServer } from './server'
 import { buildBody, postHookEvent } from './server.test-fixtures'
 
@@ -19,152 +20,140 @@ const reviewRecords = readFileSync(
 )
   .trimEnd()
   .split('\n')
+const event = (payload: object): string => `${JSON.stringify({ type: 'event_msg', payload })}\n`
+const settle = (ms = 1_200) => new Promise((resolve) => setTimeout(resolve, ms))
 
-describe('Codex review turn completion', () => {
-  let server: AgentHookServer | undefined
-  let directory: string | undefined
+describe('Codex turn completion without Stop', () => {
+  let desktop: AgentHookServer
+  let relay: RelayAgentHookServer | undefined
+  let directory: string
+  let published: (string | undefined)[]
+
+  async function startHost(relayed: boolean): Promise<void> {
+    directory = mkdtempSync(join(tmpdir(), 'codex-turn-end-'))
+    desktop = new AgentHookServer()
+    published = []
+    desktop.setListener((status) => published.push(status.hookEventName))
+    if (!relayed) {
+      await desktop.start({ env: 'production' })
+      return
+    }
+    relay = new RelayAgentHookServer({
+      endpointDir: directory,
+      forward: (envelope) => desktop.ingestRemote(envelope, 'ssh-connection')
+    })
+    await relay.start()
+  }
+
+  async function hook(payload: Record<string, unknown>): Promise<void> {
+    const body = buildBody({ session_id: 'root-session', ...payload })
+    const coordinates = relay?.getCoordinates()
+    const response = coordinates
+      ? await fetch(`http://127.0.0.1:${coordinates.port}/hook/codex`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Orca-Agent-Hook-Token': coordinates.token
+          },
+          body: JSON.stringify(body)
+        })
+      : await postHookEvent(desktop, body, '/hook/codex')
+    expect(response.status).toBe(204)
+  }
 
   afterEach(() => {
-    server?.stop()
-    if (directory) {
-      rmSync(directory, { recursive: true, force: true })
-    }
+    desktop.stop()
+    relay?.stop()
+    relay = undefined
+    rmSync(directory, { recursive: true, force: true })
   })
 
-  it('settles the main agent from the review child rollout without Stop and leaves a newer turn working', async () => {
-    directory = mkdtempSync(join(tmpdir(), 'codex-review-turn-'))
+  it('settles a /review from its child rollout and leaves later turns working', async () => {
+    await startHost(false)
     const childPath = join(directory, 'review-child.jsonl')
     writeFileSync(childPath, `${reviewRecords[0]}\n`)
-    server = new AgentHookServer()
-    const published: (string | undefined)[] = []
-    server.setListener((status) => published.push(status.hookEventName))
-    await server.start({ env: 'production' })
-
     // Real review hooks carry the root session ID and child turn/path, with no agent_id or Stop.
-    for (const hookEventName of [
-      'UserPromptSubmit',
-      'PreToolUse',
-      'PostToolUse',
-      'PreToolUse',
-      'PostToolUse'
-    ] as const) {
-      const response = await postHookEvent(
-        server,
-        buildBody({
-          hook_event_name: hookEventName,
-          session_id: 'root-session',
-          transcript_path: childPath,
-          turn_id: 'child-turn',
-          ...(hookEventName === 'UserPromptSubmit' ? { prompt: 'Review current changes' } : {}),
-          ...(hookEventName === 'UserPromptSubmit' ? {} : { tool_name: 'Bash' })
-        }),
-        '/hook/codex'
-      )
-      expect(response.status).toBe(204)
+    const review = { transcript_path: childPath, turn_id: 'child-turn' }
+    await hook({ ...review, hook_event_name: 'UserPromptSubmit', prompt: 'Review changes' })
+    for (const hookEventName of ['PreToolUse', 'PostToolUse', 'PreToolUse', 'PostToolUse']) {
+      await hook({ ...review, hook_event_name: hookEventName, tool_name: 'Bash' })
     }
-    expect(server.getStatusSnapshot()[0]).toMatchObject({
+    expect(desktop.getStatusSnapshot()[0]).toMatchObject({
       state: 'working',
-      mainAgent: { state: 'working' },
       providerSession: { id: 'root-session', transcriptPath: childPath }
     })
 
     appendFileSync(childPath, `${reviewRecords[1]}\n`)
     await vi.waitFor(
-      () => {
-        expect(server?.getStatusSnapshot()[0]).toMatchObject({
+      () =>
+        expect(desktop.getStatusSnapshot()[0]).toMatchObject({
           state: 'done',
           mainAgent: { state: 'done' }
-        })
-      },
+        }),
       { timeout: 3_000 }
     )
     // Desktops that predate host-owned turn verdicts still recognize a labelled Stop.
     expect(published.at(-1)).toBe('Stop')
 
-    // A newer turn in the same rollout must not be settled by the review's recorded end.
-    appendFileSync(
-      childPath,
-      '{"type":"event_msg","payload":{"type":"task_started","turn_id":"next-turn"}}\n'
-    )
-    const next = await postHookEvent(
-      server,
-      buildBody({
-        hook_event_name: 'UserPromptSubmit',
-        session_id: 'root-session',
-        transcript_path: childPath,
-        turn_id: 'next-turn',
-        prompt: 'Next task'
-      }),
-      '/hook/codex'
-    )
-    expect(next.status).toBe(204)
-    await new Promise((resolve) => setTimeout(resolve, 1_200))
-    expect(server.getStatusSnapshot()[0]).toMatchObject({
-      state: 'working',
-      mainAgent: { state: 'working' }
+    // Neither a compaction queued before the next prompt nor a newer turn replays the review's end.
+    await hook({ hook_event_name: 'SessionStart', source: 'compact', transcript_path: childPath })
+    await settle()
+    expect(published.at(-1)).toBe('SessionStart')
+    appendFileSync(childPath, event({ type: 'task_started', turn_id: 'next-turn' }))
+    await hook({
+      ...review,
+      turn_id: 'next-turn',
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'Next'
     })
+    await settle()
+    expect(desktop.getStatusSnapshot()[0]).toMatchObject({ mainAgent: { state: 'working' } })
+
+    // A real Stop that lands before its rollout end, then a compaction, never rearms that turn.
+    await hook({ ...review, turn_id: 'next-turn', hook_event_name: 'Stop' })
+    await hook({ hook_event_name: 'SessionStart', source: 'compact', transcript_path: childPath })
+    appendFileSync(childPath, event({ type: 'task_complete', turn_id: 'next-turn' }))
+    await settle()
+    expect(published.slice(-2)).toEqual(['Stop', 'SessionStart'])
   })
 
   it.each([
-    ['in an earlier poll', true],
-    ['in the same poll', false]
-  ])('settles a failed turn without Stop after a child finished %s', async (_, separatePolls) => {
-    directory = mkdtempSync(join(tmpdir(), 'codex-failed-turn-'))
-    const day = join(directory, '2026', '10', '16')
-    mkdirSync(day, { recursive: true })
-    const rootPath = join(day, 'rollout-2026-10-16T00-00-00-root.jsonl')
-    const childId = '0199aaaa-bbbb-cccc-dddd-eeeeffff0001'
-    const childPath = join(day, `rollout-2026-10-16T00-00-01-${childId}.jsonl`)
-    const event = (payload: object): string => `${JSON.stringify({ type: 'event_msg', payload })}\n`
-    writeFileSync(rootPath, event({ type: 'task_started', turn_id: 'root-turn' }))
-    server = new AgentHookServer()
-    const published: (string | undefined)[] = []
-    server.setListener((status) => published.push(status.hookEventName))
-    await server.start({ env: 'production' })
-    const hook = (hookEventName: string, extra: Record<string, unknown> = {}) =>
-      postHookEvent(
-        server!,
-        buildBody({
-          hook_event_name: hookEventName,
-          session_id: 'root-session',
-          transcript_path: rootPath,
-          turn_id: 'root-turn',
-          ...extra
-        }),
-        '/hook/codex'
+    ['locally', 'in an earlier poll', false, true],
+    ['locally', 'in the same poll', false, false],
+    ['through a relay', 'in an earlier poll', true, true]
+  ])(
+    'settles a failed turn %s after a child finished %s',
+    async (_, __, relayed, separatePolls) => {
+      await startHost(relayed)
+      const day = join(directory, '2026', '10', '16')
+      mkdirSync(day, { recursive: true })
+      const rootPath = join(day, 'rollout-2026-10-16T00-00-00-root.jsonl')
+      const childId = '0199aaaa-bbbb-cccc-dddd-eeeeffff0001'
+      const childPath = join(day, `rollout-2026-10-16T00-00-01-${childId}.jsonl`)
+      const root = { transcript_path: rootPath, turn_id: 'root-turn' }
+      writeFileSync(rootPath, event({ type: 'task_started', turn_id: 'root-turn' }))
+      await hook({ ...root, hook_event_name: 'UserPromptSubmit', prompt: 'Do the task' })
+      const started = { agent_thread_id: childId, kind: 'started', occurred_at_ms: Date.now() }
+      appendFileSync(rootPath, event({ type: 'sub_agent_activity', ...started }))
+      writeFileSync(childPath, event({ type: 'task_started', turn_id: 'child-turn' }))
+      await hook({ ...root, hook_event_name: 'PostToolUse', tool_name: 'spawn_agent' })
+
+      appendFileSync(childPath, event({ type: 'task_complete', turn_id: 'child-turn' }))
+      if (separatePolls) {
+        await settle()
+      }
+      const failure = { error: { message: 'usage limit' } }
+      appendFileSync(rootPath, event({ type: 'task_complete', turn_id: 'root-turn', ...failure }))
+      await vi.waitFor(
+        () =>
+          expect(desktop.getStatusSnapshot()[0]).toMatchObject({
+            state: 'done',
+            mainAgent: { state: 'done', outcome: 'failure' }
+          }),
+        { timeout: 3_000 }
       )
-
-    expect((await hook('UserPromptSubmit', { prompt: 'Do the task' })).status).toBe(204)
-    appendFileSync(
-      rootPath,
-      event({
-        type: 'sub_agent_activity',
-        agent_thread_id: childId,
-        kind: 'started',
-        occurred_at_ms: Date.now()
-      })
-    )
-    writeFileSync(childPath, event({ type: 'task_started', turn_id: 'child-turn' }))
-    expect((await hook('PostToolUse', { tool_name: 'spawn_agent' })).status).toBe(204)
-
-    appendFileSync(childPath, event({ type: 'task_complete', turn_id: 'child-turn' }))
-    if (separatePolls) {
-      await new Promise((resolve) => setTimeout(resolve, 1_200))
+      // Desktops derive a labelled Stop's outcome as success, so a failure goes out unlabelled.
+      expect(published.at(-1)).toBeUndefined()
     }
-    appendFileSync(
-      rootPath,
-      event({ type: 'task_complete', turn_id: 'root-turn', error: { message: 'usage limit' } })
-    )
-    await vi.waitFor(
-      () => {
-        expect(server?.getStatusSnapshot()[0]).toMatchObject({
-          state: 'done',
-          mainAgent: { state: 'done', outcome: 'failure' }
-        })
-      },
-      { timeout: 3_000 }
-    )
-    // Desktops derive a labelled Stop's outcome as success, so a failure goes out unlabelled.
-    expect(published.at(-1)).toBeUndefined()
-  })
+  )
 })

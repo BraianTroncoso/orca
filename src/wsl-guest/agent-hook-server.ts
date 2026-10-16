@@ -102,9 +102,8 @@ export class RelayAgentHookServer extends RelayAgentHookCanonicalStatus {
       state: this.state,
       env: this.env,
       isListening: () => this.server !== null,
-      applyEvent: (event, source, env, version) => {
+      applyEvent: (event, source, env, version) =>
         this.applyEvent(event, source, env, version, { checkPresence: false })
-      }
     })
   }
 
