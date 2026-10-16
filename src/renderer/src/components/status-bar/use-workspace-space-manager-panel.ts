@@ -1,7 +1,10 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import type { WorkspaceSpaceWorktree } from '../../../../shared/workspace-space-types'
-import type { WorktreeRemovalTarget } from '../../../../shared/worktree/removal'
+import {
+  toWorktreeRemovalTarget,
+  type WorktreeRemovalTarget
+} from '../../../../shared/worktree/removal'
 import { composeWorktreeHostIdentity } from '../../../../shared/worktree/host-qualified-identity'
 import { useAppStore } from '../../store'
 import { getWorktreeOnHostFromState } from '../../store/selectors'
@@ -189,6 +192,12 @@ export function useWorkspaceSpaceManagerPanel() {
       // Why: Space keeps normal deletes non-force so uncommitted work is not
       // discarded silently; a failed row gets this explicit recovery path.
       const commitFocus = prepareActiveWorktreeFocusAfterDelete(worktree.worktreeId)
+      // The failure toast is keyed by the store row's host, which a host-less saved Space row lacks.
+      const storeRow = getWorktreeOnHostFromState(
+        useAppStore.getState(),
+        worktree.worktreeId,
+        worktree.executionHostId ?? undefined
+      )
       // Why (#11960): explicit force recovery, so it may also waive PTY-stop proof.
       void removeWorktree(
         { id: worktree.worktreeId, executionHostId: worktree.executionHostId ?? null },
@@ -207,6 +216,9 @@ export function useWorkspaceSpaceManagerPanel() {
             return
           }
           commitFocus()
+          if (storeRow) {
+            dismissDeleteWorktreeFailureToast(toWorktreeRemovalTarget(storeRow))
+          }
           handleDeletedWorktrees([
             { id: worktree.worktreeId, executionHostId: worktree.executionHostId ?? null }
           ])
