@@ -84,7 +84,10 @@ export class LegacyRelayTargetBridge {
     return this.refreshing
   }
 
-  async attach(ptyId: string): Promise<LegacyRelayBridgeAttachResult> {
+  async attach(
+    ptyId: string,
+    atSnapshot?: (replay: string) => void
+  ): Promise<LegacyRelayBridgeAttachResult> {
     await (this.looked ? this.refreshing : this.refresh())
     let pane = this.panes.get(ptyId)
     if (pane?.state === 'unverifiable') {
@@ -107,7 +110,7 @@ export class LegacyRelayTargetBridge {
     // Why before the request: output that races the reply must reach the pane, not be dropped.
     this.attached.set(ptyId, (this.attached.get(ptyId) ?? 0) + 1)
     try {
-      const { replay } = await client.attach(pane.relayPtyId)
+      const { replay } = await client.attach(pane.relayPtyId, atSnapshot)
       this.attachFailing = false
       return { status: 'attached', replay }
     } catch (error) {

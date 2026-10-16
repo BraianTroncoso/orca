@@ -71,7 +71,16 @@ export function renewRuntimeMobileAgentStatusFromPtyTitle(
       return status
     }
     if (pty.lastAgentStatus === null && !terminalTitleBlocksExplicitAgentStatus(pty.lastOscTitle)) {
-      return status
+      // Why: an earlier title-only `working` was published at a later stamp; returning the
+      // older hook stamp makes clients keep that `working` forever (#28102). updatedAt is
+      // the ordering clock, so advance it while evidenceObservedAt keeps freshness honest.
+      return status.state !== 'working' && titleEvidenceAt > status.updatedAt
+        ? {
+            ...status,
+            updatedAt: titleEvidenceAt,
+            evidenceObservedAt: agentStatusAuthorityObservedAt(status)
+          }
+        : status
     }
     const titleState =
       pty.lastAgentStatus === 'working'

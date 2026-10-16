@@ -79,6 +79,11 @@ const PtyRowSchema = z.object({
 
 const AttachResultSchema = z.object({ replay: z.string().optional().catch(undefined) }).nullable()
 
+function replayOf(result: unknown): string {
+  const parsed = AttachResultSchema.safeParse(result)
+  return (parsed.success ? parsed.data?.replay : undefined) ?? ''
+}
+
 function parseOwnerGrant(value: unknown): LegacyRelayOwnerClaim {
   const grant = OwnerGrantSchema.safeParse(value)
   if (!grant.success) {
@@ -154,15 +159,23 @@ export class LegacyRelayClient {
     )
   }
 
-  /** Resumes output for one PTY and returns its screen so far. Throws "not found" when it is gone. */
-  async attach(relayPtyId: string): Promise<{ replay: string }> {
+  /**
+   * Resumes output for one PTY and returns its screen so far. Throws "not found" when it is gone.
+   * `atSnapshot` runs in stream order: output routed before it is in the screen, output after is not.
+   */
+  async attach(
+    relayPtyId: string,
+    atSnapshot?: (replay: string) => void
+  ): Promise<{ replay: string }> {
     const result = await this.mux.request(
       'pty.attach',
       { id: relayPtyId, suppressReplayNotification: true, requireReplay: true },
-      { timeoutMs: REQUEST_TIMEOUT_MS }
+      {
+        timeoutMs: REQUEST_TIMEOUT_MS,
+        ...(atSnapshot ? { beforeResolve: (value: unknown) => atSnapshot(replayOf(value)) } : {})
+      }
     )
-    const parsed = AttachResultSchema.safeParse(result)
-    return { replay: (parsed.success ? parsed.data?.replay : undefined) ?? '' }
+    return { replay: replayOf(result) }
   }
 
   write(relayPtyId: string, data: string): void {

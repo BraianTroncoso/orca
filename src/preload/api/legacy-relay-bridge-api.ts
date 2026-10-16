@@ -15,8 +15,10 @@ export type LegacyRelayBridgeApi = {
   write: (args: { ptyId: string; data: string }) => void
   resize: (args: { ptyId: string; cols: number; rows: number }) => void
   detach: (args: { ptyId: string }) => void
+  setOutputPaused: (args: { ptyId: string; paused: boolean }) => void
   onPanes: (callback: (panes: LegacyRelayBridgedPane[]) => void) => () => void
   onData: (callback: (event: { ptyId: string; data: string }) => void) => () => void
+  onReplay: (callback: (event: { ptyId: string; replay: string }) => void) => () => void
   onExit: (callback: (event: { ptyId: string; code: number }) => void) => () => void
 }
 
@@ -34,7 +36,9 @@ export const legacyRelayBridgeApi: LegacyRelayBridgeApi = {
   write: (args) => ipcRenderer.send(CHANNELS.write, args),
   resize: (args) => ipcRenderer.send(CHANNELS.resize, args),
   detach: (args) => ipcRenderer.send(CHANNELS.detach, args),
+  setOutputPaused: (args) => ipcRenderer.send(CHANNELS.setOutputPaused, args),
   onPanes: (callback) => subscribe(CHANNELS.panes, callback),
   onData: (callback) => subscribe(CHANNELS.data, callback),
+  onReplay: (callback) => subscribe(CHANNELS.replay, callback),
   onExit: (callback) => subscribe(CHANNELS.exit, callback)
 }
