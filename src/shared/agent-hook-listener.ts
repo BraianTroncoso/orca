@@ -28,7 +28,6 @@ import {
   trackOpenCodePaneLaunchToken
 } from './agent-hook-listener/opencode-session-registry'
 import { claudeRowHasUnlistedLiveWork } from './agent-hook-listener/providers/claude-pane-hold-evidence'
-import { codexHookEventForEndedTurn } from './agent-hook-listener/providers/codex-events'
 import { readString } from './agent-hook-listener/tool-input-preview'
 /** Canonical transport-agnostic normalization entry shared by main and relay listeners. */
 const CLAUDE_EXIT_SESSION_END_REASONS = new Set([
@@ -69,7 +68,7 @@ export function normalizeHookPayload(
   if (source === 'claude') {
     state.claudeUnconfirmedRestoredStatusPaneKeys.delete(stampedPaneKey)
   }
-  const postedEventName =
+  const eventName =
     readFirstString(record, ['hook_event_name', 'hookEventName', 'hook_type', 'hookType']) ??
     hookPayloadRecord.hook_event_name ??
     hookPayloadRecord.hookEventName ??
@@ -77,10 +76,6 @@ export function normalizeHookPayload(
     // verbatim through the shared transport rather than re-stated as a form field.
     // Scoped so another provider's unrelated `event` key cannot become an event name.
     (source === 'jcode' ? hookPayloadRecord.event : undefined)
-  const eventName =
-    source === 'codex'
-      ? codexHookEventForEndedTurn(state, stampedPaneKey, postedEventName, hookPayloadRecord)
-      : postedEventName
   // Codex child hooks expose the child's session_id on the parent's pane.
   const providerSession =
     source === 'codex' && readString(hookPayloadRecord, 'agent_id')
@@ -309,13 +304,13 @@ export function normalizeHookPayload(
           : undefined
         : hasExplicitUserPrompt(
             source,
-            eventName,
+            dispatched.eventName,
             extractedPrompt,
             dispatched.resolvedPromptText,
             dispatched.hasTranscriptPromptEvidence
           ),
     promptInteractionKey: dispatched.promptInteractionKey,
-    hookEventName: typeof eventName === 'string' ? eventName : undefined,
+    hookEventName: typeof dispatched.eventName === 'string' ? dispatched.eventName : undefined,
     providerPromptId:
       source === 'grok' ? (grokActiveTurn?.promptId ?? providerPromptId) : providerPromptId,
     grokPromptBoundary: grokActiveTurn ? true : undefined,
