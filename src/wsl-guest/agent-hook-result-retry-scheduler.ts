@@ -136,7 +136,7 @@ export class AgentHookResultRetryScheduler {
     }
     const event =
       source === 'codex'
-        ? pollCodexTranscriptStatus(this.host.state, original)
+        ? pollCodexTranscriptStatus(this.host.state, original, body, this.host.env)
         : normalizeHookPayload(this.host.state, source, body, this.host.env)
     if (!event) {
       return

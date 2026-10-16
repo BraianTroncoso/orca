@@ -34,8 +34,7 @@ import {
   getOrCreateCodexSubagentTranscriptState,
   hasCodexTranscriptSubagents,
   resolveCodexPaneStatus,
-  setCodexMainAgentTurnState,
-  settleCodexLeadTurnFromTranscript
+  setCodexMainAgentTurnState
 } from './codex-state'
 
 export function buildCodexStatusPayload(
@@ -111,11 +110,6 @@ export function normalizeCodexSubagentLifecycleEvent(
   } else {
     finishCodexSubagent(roster, agentId)
   }
-  const transcript = state.codexSubagentTranscriptByPaneKey.get(paneKey)
-  if (transcript?.parent.filePath) {
-    reconcileCodexSubagentTranscript(transcript, roster, transcript.parent.filePath)
-  }
-  settleCodexLeadTurnFromTranscript(state, paneKey)
   return buildCodexChildDrivenStatusPayload(state, eventName, paneKey, hookPayload)
 }
 
@@ -243,41 +237,39 @@ export function normalizeCodexEvent(
       },
       Date.now()
     )
-    const transcript = state.codexSubagentTranscriptByPaneKey.get(paneKey)
-    if (transcript?.parent.filePath) {
-      reconcileCodexSubagentTranscript(
-        transcript,
-        getOrCreateCodexSubagentRoster(state, paneKey),
-        transcript.parent.filePath
-      )
-    }
-    settleCodexLeadTurnFromTranscript(state, paneKey)
     return buildCodexChildDrivenStatusPayload(state, eventName, paneKey, hookPayload)
   }
 
-  const turnId = readString(hookPayload, 'turn_id')
-  const turnEnd =
-    stateName !== 'done' && turnId
-      ? codexTranscriptTurnEnd(state.codexSubagentTranscriptByPaneKey.get(paneKey), turnId)
-      : undefined
-  if ((eventName === 'Stop' || turnEnd) && !hasCodexTranscriptSubagents(state, paneKey)) {
+  if (eventName === 'Stop' && !hasCodexTranscriptSubagents(state, paneKey)) {
     // Why: Codex CLI 0.144 can omit child Stop hooks; later child activity safely recreates any agent still running.
     state.codexSubagentRosterByPaneKey.delete(paneKey)
   }
   // Why: resolved after the transcript reconcile above, so this turn's reviewer is read from the
   // rollout during the very PermissionRequest being classified, not from a prior event.
-  const ownedState = turnEnd
-    ? 'done'
-    : resolveCodexApprovalOwnedState(state, eventName, paneKey, transcriptPath, stateName)
+  const ownedState = resolveCodexApprovalOwnedState(
+    state,
+    eventName,
+    paneKey,
+    transcriptPath,
+    stateName
+  )
   const previousLead = state.codexLeadStateByPaneKey.get(paneKey)
+  const turnId = readString(hookPayload, 'turn_id')
+  // Why: Codex fires no Stop for a failed turn, so a Stop for one is the rollout's end replayed.
+  const failedTurn =
+    eventName === 'Stop' &&
+    previousLead?.state !== 'done' &&
+    turnId !== undefined &&
+    codexTranscriptTurnEnd(state.codexSubagentTranscriptByPaneKey.get(paneKey), turnId) === 'failed'
   const record = setCodexMainAgentTurnState(state, paneKey, {
     state: ownedState,
-    ...(turnEnd === 'failed'
+    ...(failedTurn
       ? { outcome: 'failure' as const }
       : codexLeadOutcomeForEvent(eventName, previousLead, ownedState)),
     model:
       normalizeOptionalField(hookPayload['model'], AGENT_MODEL_MAX_LENGTH) ??
       (eventName === 'SessionStart' ? undefined : previousLead?.model),
+    sessionId: readString(hookPayload, 'session_id'),
     // Why: only compaction restarts a session inside the running turn; any other start or prompt begins a new one.
     turnId:
       turnId ??
@@ -290,4 +282,26 @@ export function normalizeCodexEvent(
     ...resolveCodexPaneStatus(state, paneKey, record),
     updateLead: true
   })
+}
+
+/** A root hook for a turn whose rollout already recorded its end restates that end as Stop,
+ *  since Codex skips Stop for internal subagents such as /review. */
+export function codexHookEventForEndedTurn(
+  state: HookListenerState,
+  paneKey: string,
+  eventName: unknown,
+  hookPayload: Record<string, unknown>
+): unknown {
+  const turnId = readString(hookPayload, 'turn_id')
+  if (
+    !turnId ||
+    eventName === 'Stop' ||
+    eventName === 'Interrupt' ||
+    readString(hookPayload, 'agent_id')
+  ) {
+    return eventName
+  }
+  return codexTranscriptTurnEnd(state.codexSubagentTranscriptByPaneKey.get(paneKey), turnId)
+    ? 'Stop'
+    : eventName
 }

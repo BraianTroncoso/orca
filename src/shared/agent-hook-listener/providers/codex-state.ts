@@ -13,7 +13,6 @@ import {
   type CodexSubagentRoster
 } from '../../codex-subagent-roster'
 import {
-  codexTranscriptTurnEnd,
   createCodexSubagentTranscriptState,
   hasTrackedCodexTranscriptSubagents,
   type CodexSubagentTranscriptState
@@ -62,34 +61,17 @@ export function setCodexMainAgentTurnState(
   const previous = state.codexLeadStateByPaneKey.get(paneKey)
   const continued = continueMainAgentStatus(previous, next, now)
   const turnId = next.turnId === null ? undefined : (next.turnId ?? previous?.turnId)
+  const sessionId = next.sessionId ?? previous?.sessionId
   const record: CodexLeadTurnState = {
     state: next.state,
     ...(continued.outcome ? { outcome: continued.outcome } : {}),
     stateStartedAt: continued.stateStartedAt,
     model: next.model,
+    ...(sessionId ? { sessionId } : {}),
     ...(turnId ? { turnId } : {})
   }
   state.codexLeadStateByPaneKey.set(paneKey, record)
   return record
-}
-
-export function settleCodexLeadTurnFromTranscript(state: HookListenerState, paneKey: string): void {
-  const lead = state.codexLeadStateByPaneKey.get(paneKey)
-  if (!lead?.turnId || lead.state === 'done') {
-    return
-  }
-  const end = codexTranscriptTurnEnd(
-    state.codexSubagentTranscriptByPaneKey.get(paneKey),
-    lead.turnId
-  )
-  if (!end) {
-    return
-  }
-  setCodexMainAgentTurnState(state, paneKey, {
-    state: 'done',
-    ...(end === 'failed' ? { outcome: 'failure' as const } : {}),
-    model: lead.model
-  })
 }
 
 /** Interrupt is Codex's own cancel verdict. A root Stop that lands on an already finished turn
@@ -231,34 +213,16 @@ export function reconcileRemoteCodexState(
     if (eventName === 'SubagentStop') {
       finishCodexSubagent(roster, agentId)
     }
-    const lead = state.codexLeadStateByPaneKey.get(paneKey)
-    if (payload.mainAgent?.state === 'done' && lead && lead.state !== 'done') {
-      setCodexMainAgentTurnState(state, paneKey, {
-        state: 'done',
-        ...(payload.mainAgent.outcome ? { outcome: payload.mainAgent.outcome } : {}),
-        model: lead.model
-      })
-    }
   } else {
-    const eventLeadState = codexLeadStateForHookEvent(eventName, payload.state)
-    // Why: the host settles a hook for an already finished turn from its rollout, so its verdict outranks the event name.
-    const hostSettled =
-      eventName !== undefined && eventLeadState !== 'done' && payload.mainAgent?.state === 'done'
-    const leadState = hostSettled ? 'done' : eventLeadState
-    if (
-      eventName === 'SessionStart' ||
-      ((eventName === 'Stop' || hostSettled) && !payload.subagents)
-    ) {
+    const leadState = codexLeadStateForHookEvent(eventName, payload.state)
+    if (eventName === 'SessionStart' || (eventName === 'Stop' && !payload.subagents)) {
       roster.clear()
     }
     if (leadState) {
       const previousLead = state.codexLeadStateByPaneKey.get(paneKey)
-      const outcome =
-        codexLeadOutcomeForEvent(eventName, previousLead, leadState).outcome ??
-        (leadState === 'done' ? payload.mainAgent?.outcome : undefined)
       setCodexMainAgentTurnState(state, paneKey, {
         state: leadState,
-        ...(outcome ? { outcome } : {}),
+        ...codexLeadOutcomeForEvent(eventName, previousLead, leadState),
         model: payload.model ?? previousLead?.model
       })
     }
@@ -266,7 +230,7 @@ export function reconcileRemoteCodexState(
 
   if (!eventName && !agentId && payload.mainAgent && payload.mainAgent.state !== 'blocked') {
     if (payload.mainAgent.state === 'done' && !payload.subagents) {
-      // Why: a host-settled turn that reports no children has none left, even ones this cache saw start.
+      // Why: an unlabelled host turn end (failed or cancelled) reporting no children has none left.
       roster.clear()
     }
     setCodexMainAgentTurnState(state, paneKey, {

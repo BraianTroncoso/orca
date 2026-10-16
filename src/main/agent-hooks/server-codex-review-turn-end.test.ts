@@ -36,6 +36,8 @@ describe('Codex review turn completion', () => {
     const childPath = join(directory, 'review-child.jsonl')
     writeFileSync(childPath, `${reviewRecords[0]}\n`)
     server = new AgentHookServer()
+    const published: (string | undefined)[] = []
+    server.setListener((status) => published.push(status.hookEventName))
     await server.start({ env: 'production' })
 
     // Real review hooks carry the root session ID and child turn/path, with no agent_id or Stop.
@@ -76,6 +78,8 @@ describe('Codex review turn completion', () => {
       },
       { timeout: 3_000 }
     )
+    // Desktops that predate host-owned turn verdicts still recognize a labelled Stop.
+    expect(published.at(-1)).toBe('Stop')
 
     // A newer turn in the same rollout must not be settled by the review's recorded end.
     appendFileSync(
@@ -114,6 +118,8 @@ describe('Codex review turn completion', () => {
     const event = (payload: object): string => `${JSON.stringify({ type: 'event_msg', payload })}\n`
     writeFileSync(rootPath, event({ type: 'task_started', turn_id: 'root-turn' }))
     server = new AgentHookServer()
+    const published: (string | undefined)[] = []
+    server.setListener((status) => published.push(status.hookEventName))
     await server.start({ env: 'production' })
     const hook = (hookEventName: string, extra: Record<string, unknown> = {}) =>
       postHookEvent(
@@ -158,5 +164,7 @@ describe('Codex review turn completion', () => {
       },
       { timeout: 3_000 }
     )
+    // Desktops derive a labelled Stop's outcome as success, so a failure goes out unlabelled.
+    expect(published.at(-1)).toBeUndefined()
   })
 })
