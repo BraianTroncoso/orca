@@ -12,7 +12,11 @@ const pageScroller = vi.hoisted(() => ({
   scrollTop: 0,
   scrollHeight: 0,
   clientHeight: 500,
-  getInnerViewNode: () => ({})
+  clientWidth: 320,
+  getInnerViewNode: () => ({}),
+  getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
+  addEventListener: () => {},
+  removeEventListener: () => {}
 }))
 const getScrollableNode = vi.hoisted(() => () => pageScroller)
 
@@ -26,7 +30,19 @@ vi.mock('react-native', async () => {
     }),
     Platform: platform,
     Pressable: 'Pressable',
-    ScrollView: 'ScrollView',
+    ScrollView: React.forwardRef((props, ref) => {
+      React.useImperativeHandle(
+        ref,
+        () => ({
+          scrollTo: ({ y, animated }: { y: number; animated: boolean }) =>
+            scrollToOffset({ animated, offset: y }),
+          scrollToEnd,
+          getScrollableNode
+        }),
+        []
+      )
+      return React.createElement('ScrollView', props)
+    }),
     StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
     Text: 'Text',
     View: 'View'
@@ -598,9 +614,16 @@ describe('MobileNativeChatView', () => {
   })
 
   describe('on the page, where the list reports no drag or momentum', () => {
-    const observers = new Set<() => void>()
+    const observers = new Set<(entries: unknown[]) => void>()
     // The browser's resize step, before paint; RN Web's size report comes a task later.
-    const resized = () => act(() => observers.forEach((deliver) => deliver()))
+    const resized = () => act(() => observers.forEach((deliver) => deliver([])))
+    const page = () => renderer!.root.findByType('ScrollView' as never)
+    const loadEarlier = () =>
+      renderer!.root.find(
+        (node) =>
+          node.type === 'Pressable' &&
+          node.findAll((text) => text.props.children === 'Load earlier messages').length > 0
+      )
 
     beforeEach(() => {
       platform.OS = 'web'
@@ -609,9 +632,10 @@ describe('MobileNativeChatView', () => {
         pageScroller.scrollTop = to.offset
       })
       observers.clear()
-      vi.stubGlobal('ResizeObserver', function (deliver: () => void) {
+      vi.stubGlobal('ResizeObserver', function (deliver: (entries: unknown[]) => void) {
         return {
           observe: () => observers.add(deliver),
+          unobserve: () => {},
           disconnect: () => observers.delete(deliver)
         }
       })
@@ -626,34 +650,29 @@ describe('MobileNativeChatView', () => {
       return scrollEvent(y, contentHeight)
     }
 
-    it('holds a following reader at the live end through growth, a late size report and layout', async () => {
+    it('holds a following reader at the live end through growth and a smaller viewport', async () => {
       const latest = [assistantTurn('a1', 'Latest')]
       const landed = [assistantTurn('a0', 'Older'), ...latest]
       const onLoadEarlier = vi.fn()
       await render({ folded: latest, hasMore: true, onLoadEarlier })
-      act(() => list().props.onScroll(scrolledTo(500, 1_000)))
+      act(() => page().props.onScroll(scrolledTo(500, 1_000)))
 
-      // Older rows land; the observer pins before RN Web's size report, which comes a task later.
-      act(() => list().props.ListHeaderComponent.props.onPress())
+      // Older rows land; the observer pins before paint.
+      act(() => loadEarlier().props.onPress())
       await update({ folded: landed, hasMore: true, onLoadEarlier })
       pageScroller.scrollHeight = 5_000
       resized()
       expect(onLoadEarlier).toHaveBeenCalledOnce()
       expect(scrollToOffset).toHaveBeenCalledOnce()
       expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 4_500 })
-      // That report, of the old height, can't pull the view back.
-      act(() => list().props.onContentSizeChange(320, 1_000))
-      expect(scrollToOffset).toHaveBeenCalledOnce()
 
       // The pin's own move, short of a reply that grew meanwhile, is not the reader's.
-      act(() => {
-        list().props.onScroll(scrolledTo(4_500, 5_400))
-        list().props.onContentSizeChange(320, 5_400)
-      })
+      act(() => page().props.onScroll(scrolledTo(4_500, 5_400)))
+      resized()
       expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 4_900 })
 
       // No drag event arrives on the page: the move up is all there is to go on.
-      act(() => list().props.onScroll(scrolledTo(3_000, 5_400)))
+      act(() => page().props.onScroll(scrolledTo(3_000, 5_400)))
       pageScroller.scrollHeight = 6_000
       resized()
       expect(scrollToOffset).toHaveBeenCalledTimes(2)
@@ -662,24 +681,22 @@ describe('MobileNativeChatView', () => {
       ).toHaveLength(1)
 
       // Back at the end it follows again, and a smaller viewport pins to the live end.
-      act(() => list().props.onScroll(scrolledTo(5_500, 6_000)))
+      act(() => page().props.onScroll(scrolledTo(5_500, 6_000)))
       pageScroller.scrollHeight = 6_400
       resized()
       expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 5_900 })
       pageScroller.clientHeight = 300
-      act(() => list().props.onLayout?.({}))
+      resized()
       expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 6_100 })
       expect(scrollToEnd).not.toHaveBeenCalled()
     })
 
     // What the page's scroller tells the browser: the transcript's wrapper, then the end marker.
     function transcriptStyle(): unknown[] {
-      const page = list().props.renderScrollComponent({ children: 'rows' })
-      const [content, marker, ...rest] = page.type(page.props).props.children
+      const [content, marker, ...rest] = page().children as ReactTestInstance[]
       expect(rest).toHaveLength(0)
-      expect(marker.props.style).toEqual({ height: 1 })
-      expect(content.props.children).toBe('rows')
-      return content.props.style
+      expect(marker!.props.style).toEqual({ height: 1 })
+      return content!.props.style
     }
 
     it('keeps a following reader at the cap out of the browser anchoring while the oldest row is trimmed', async () => {
@@ -687,7 +704,7 @@ describe('MobileNativeChatView', () => {
       const jumps = () =>
         renderer!.root.findAll((node) => node.props.accessibilityLabel === 'Scroll to latest')
       await render({ folded: turns.slice(0, 3) })
-      act(() => list().props.onScroll(scrolledTo(500, 1_000)))
+      act(() => page().props.onScroll(scrolledTo(500, 1_000)))
 
       // Trim plus append of the same height: no size change, so the owner rightly does nothing.
       await update({ folded: turns.slice(1) })
@@ -696,9 +713,9 @@ describe('MobileNativeChatView', () => {
       expect(transcriptStyle()).toContainEqual({ overflowAnchor: 'none' })
 
       // Parked, the browser may anchor a message again; the jump back follows the end once more.
-      act(() => list().props.onScroll(scrolledTo(300, 1_000)))
+      act(() => page().props.onScroll(scrolledTo(300, 1_000)))
       expect(transcriptStyle()).not.toContainEqual({ overflowAnchor: 'none' })
-      act(() => jumps()[0].props.onPress())
+      act(() => jumps()[0]!.props.onPress())
       expect(transcriptStyle()).toContainEqual({ overflowAnchor: 'none' })
     })
 
@@ -708,12 +725,12 @@ describe('MobileNativeChatView', () => {
 
       // Down to the top and into iOS's bounce past it.
       act(() => {
-        list().props.onScroll(scrolledTo(40, 540))
-        list().props.onScroll(scrolledTo(-15, 540))
+        page().props.onScroll(scrolledTo(40, 540))
+        page().props.onScroll(scrolledTo(-15, 540))
       })
       expect(onLoadEarlier).not.toHaveBeenCalled()
 
-      act(() => list().props.ListHeaderComponent.props.onPress())
+      act(() => loadEarlier().props.onPress())
       expect(onLoadEarlier).toHaveBeenCalledOnce()
     })
   })

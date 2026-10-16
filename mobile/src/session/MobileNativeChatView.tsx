@@ -52,6 +52,7 @@ import type { MobileNativeChatSessionOptionPickersProps } from './MobileNativeCh
 import { MobileNativeChatMessage } from './MobileNativeChatMessage'
 import { MobileNativeChatScrollHold } from './MobileNativeChatScrollHold'
 import { MobileNativeChatPageList } from './MobileNativeChatPageList'
+import { useMobileNativeChatFoldReuse } from './mobile-native-chat-fold-reuse'
 import { mobileNativeChatUnsentNotices } from './mobile-native-chat-unsent-notices'
 import type { MobileNativeChatStatus } from './use-mobile-native-chat-session'
 import type { OlderPagePhase } from './use-mobile-older-page-loader'
@@ -91,7 +92,8 @@ type Props = ComposerTrayProps & {
   streaming: string | null
   hasMore?: boolean
   olderPages?: OlderPagePhase
-  onLoadEarlier?: () => void
+  /** `settled`: on the page, an older page waits for it so it never lands under a moving reader. */
+  onLoadEarlier?: (settled?: () => Promise<void>) => void
   onSend: (text: string) => Promise<boolean>
   /** Route identity used to fence accepted sends that settle after a tab/view switch. */
   sendSurfaceId: string
@@ -162,7 +164,7 @@ type Props = ComposerTrayProps & {
 
 export function MobileNativeChatView({
   messages,
-  folded,
+  folded: foldedNow,
   status,
   error,
   readFailedFinally = false,
@@ -220,6 +222,7 @@ export function MobileNativeChatView({
   onOpenFile,
   keyboardInset = 0
 }: Props): React.JSX.Element {
+  const folded = useMobileNativeChatFoldReuse(foldedNow, sendSurfaceId)
   const insets = useSafeAreaInsets()
   const [toolsExpanded, setToolsExpanded] = useState(false)
   // Lift the composer clear of the keyboard, plus the bottom safe-area so it
@@ -261,7 +264,11 @@ export function MobileNativeChatView({
     [onSend, onClearSendError, jumpToTail]
   )
 
-  const loadEarlier = useCallback(() => onLoadEarlier?.(), [onLoadEarlier])
+  const { listRef } = tail.placeHold
+  const loadEarlier = useCallback(
+    () => onLoadEarlier?.(Platform.OS === 'web' ? () => listRef.current?.settled?.() ?? Promise.resolve() : undefined),
+    [onLoadEarlier, listRef]
+  )
 
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -362,8 +369,12 @@ export function MobileNativeChatView({
                 rows={turns.listMessages}
                 rowKeys={rowKeys}
                 renderItem={renderItem}
+                rowState={turns.resolveRow}
                 layoutKey={`${fontScale}:${toolsExpanded}`}
-                {...{ header, footer, emptyStateView, onScroll }}
+                header={(measuring) =>
+                  mobileNativeChatListHeader(hasMore, olderPages, loadEarlier, measuring)
+                }
+                {...{ footer, emptyStateView, onScroll }}
               />
             ) : (
               <FlatList

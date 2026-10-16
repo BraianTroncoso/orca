@@ -1,77 +1,75 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import type { MobileNativeChatRowKeys } from './mobile-native-chat-row-keys'
-import {
-  boxHeight,
-  coverMobileNativeChatWindow,
-  mobileNativeChatSpan,
-  type MobileNativeChatBox,
-  type MobileNativeChatWindowExtent
-} from './mobile-native-chat-page-window-coverage'
+import { MobileNativeChatPageHeights } from './mobile-native-chat-page-heights'
+import { MobileNativeChatPageMotion } from './mobile-native-chat-page-motion'
+import { coverMobileNativeChatWindow } from './mobile-native-chat-page-window-coverage'
 
-const FIRST_ESTIMATE = 80
-/** No touch and no scroll for this long is at rest: a write any sooner can stop iOS momentum. */
-const REST_MS = 150
+/** Rows measured in one settled moment: few enough not to drop a frame. */
+const MEASURE_ROWS = 24
+/** A parked reader's unmeasured rows are measured only within this many screens above them. */
+const MEASURE_REACH = 3
+/** Without anything else owed, rows that may have changed are checked at most this often. */
+const STALE_SCAN_MS = 200
 
-export const MOBILE_NATIVE_CHAT_WINDOW_ID = 'chat-window'
-
-type Measured = { getBoundingClientRect: () => MobileNativeChatBox }
+type Box = { top: number; bottom: number }
+type Measured = { getBoundingClientRect: () => Box }
 
 export type MobileNativeChatWindowScroller = Measured & {
   scrollTop: number
+  scrollHeight: number
   clientHeight: number
   clientWidth: number
-  querySelector: (selector: string) => { children: ArrayLike<Measured> } | null
   addEventListener: (type: string, listener: () => void, options: { passive: true }) => void
   removeEventListener: (type: string, listener: () => void) => void
 }
 
+type RowState = (index: number, row: NativeChatMessage) => object
+type Group = { from: string; fromAt: number; to: string; toAt: number }
+
+/** Where the window stands, by key, so landings and trims never change which rows are drawn. */
 type Win = {
   scope: string
-  /** Its index when committed is where the window stays once the key is gone. */
   first: string
   firstAt: number
   last: string | null
   lastAt: number
-  /** The top spacer while parked; following derives it. */
-  top: number
-  /** The first row before rows were drawn above it; their height comes out of the spacer. */
-  absorb: string | null
+  /** Measured rows trimmed from above a parked reader: their height stays until settled. */
+  slack: number
+  /** Rows drawn in place above the window only so they get measured. */
+  measure: Group | null
 }
 
-type Motion = {
-  touching: boolean
-  lastScroll: number
-  timer: ReturnType<typeof setTimeout> | undefined
-  owed: boolean
-  drift: number
-  /** Written once the spacer change it goes with is in the document. */
-  writeTo: number | null
+type Drawn = {
+  keys: readonly string[]
+  rows: readonly NativeChatMessage[]
+  indexOf: (key: string | undefined) => number | undefined
+  rowState: RowState
+  start: number
+  end: number
+  /** The first row in the document: rows above it were never measured. */
+  first: number
+  sourceHead: string | undefined
+  following: boolean
+  layoutKey: string
 }
 
-function drawnBoxes(scroller: MobileNativeChatWindowScroller): MobileNativeChatBox[] {
-  const node = scroller.querySelector(`[data-testid="${MOBILE_NATIVE_CHAT_WINDOW_ID}"]`)
-  return node ? Array.from(node.children, (c) => c.getBoundingClientRect()).slice(1) : []
+function isElement(node: unknown): node is Element {
+  return typeof Element !== 'undefined' && node instanceof Element
 }
 
-/** The rows near the screen, named by key so landings and trims never change which are drawn. Rows
- *  drawn above the reader come out of the top spacer; a correction it can't take waits for rest. */
+/** The page's rows near the screen, keyed. Above the window the spacer stands only for measured rows:
+ *  rows never measured are left out, and are measured in place only while nothing can move the
+ *  reader (following, or settled), because iOS stops momentum on any scroll write. */
 export function useMobileNativeChatPageWindow(args: {
   rows: readonly NativeChatMessage[]
-  rowKeys: Pick<MobileNativeChatRowKeys, 'scope' | 'keyOf' | 'current'>
+  rowKeys: Pick<MobileNativeChatRowKeys, 'scope' | 'sourceHead' | 'keyOf' | 'current'>
+  rowState: RowState
   following: boolean
   layoutKey: string
   scroller: () => MobileNativeChatWindowScroller | null | undefined
-}): {
-  start: number
-  end: number
-  top: number
-  bottom: number
-  cover: () => void
-  keepInPlace: (drift: number) => void
-} {
-  const { rows, rowKeys, following, layoutKey, scroller } = args
-  // An external store, so its changes render synchronously before paint from any event source.
+}) {
+  const { rows, rowKeys, rowState, following, layoutKey, scroller } = args
   const store = useRef({ version: 0, notify: () => {} })
   const subscribe = useCallback((notify: () => void) => {
     store.current.notify = notify
@@ -84,243 +82,309 @@ export function useMobileNativeChatPageWindow(args: {
     store.current.version += 1
     store.current.notify()
   }, [])
-  const heights = useRef(new Map<string, number>())
-  const measured = useRef({ sum: 0, count: 0, layoutKey, width: 0 })
+  const [heights] = useState(() => new MobileNativeChatPageHeights())
   const w = useRef<Win | null>(null)
-  const drawn = useRef<MobileNativeChatWindowExtent>({
-    keys: [],
-    start: 0,
-    end: 0,
-    top: 0,
-    following
-  })
+  const drawn = useRef<Drawn | null>(null)
+  const settle = useRef(false)
+  const anchor = useRef<{ key: string; top: number } | null>(null)
+  const anchorStale = useRef(false)
+  const width = useRef(0)
   const viewport = useRef(globalThis.innerHeight || 800)
-  const motion = useRef<Motion>({
-    touching: false,
-    lastScroll: 0,
-    timer: undefined,
-    owed: false,
-    drift: 0,
-    writeTo: null
-  })
-
-  const estimate = useCallback((key: string | undefined): number => {
-    const { sum, count } = measured.current
-    return heights.current.get(key ?? '') ?? (count > 0 ? sum / count : FIRST_ESTIMATE)
-  }, [])
-  const remember = useCallback((key: string | undefined, px: number) => {
-    const was = key === undefined ? undefined : heights.current.get(key)
-    if (key !== undefined && was !== px) {
-      measured.current.sum += px - (was ?? 0)
-      measured.current.count += was === undefined ? 1 : 0
-      heights.current.set(key, px)
-    }
-  }, [])
-  const forget = useCallback((next: { layoutKey?: string; width?: number }) => {
-    heights.current.clear()
-    measured.current = { ...measured.current, ...next, sum: 0, count: 0 }
-  }, [])
-
+  const lastScan = useRef(0)
+  const rescan = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const observer = useRef<ResizeObserver | null>(null)
+  const nodes = useRef(new Map<string, Element>())
+  const nodeKeys = useRef(new WeakMap<Element, string>())
+  const refs = useRef(new Map<string, (node: unknown) => void>())
+  const onSettled = useRef(() => {})
+  const [motion] = useState(() => new MobileNativeChatPageMotion(() => onSettled.current()))
   const keys = useMemo(() => rows.map(rowKeys.keyOf), [rows, rowKeys.keyOf])
-  const indexOf = useMemo(() => new Map(keys.map((key, at) => [key, at])), [keys])
+  const indexOf = useMemo(() => {
+    let map: Map<string, number> | undefined
+    return (key: string | undefined) =>
+      key === undefined ? undefined : (map ??= new Map(keys.map((k, at) => [k, at]))).get(key)
+  }, [keys])
   const n = keys.length
-  const screen = viewport.current
   const at = (key: string, fallback: number): number =>
-    indexOf.get(rowKeys.current(key) ?? '') ?? Math.max(0, Math.min(fallback, n - 1))
+    keys[fallback] === key
+      ? fallback
+      : (indexOf(rowKeys.current(key)) ?? Math.max(0, Math.min(fallback, n - 1)))
   const seatAtEnd = (): Win => {
     let first = n
-    for (let filled = 0; first > 0 && filled < screen; first -= 1) {
-      filled += estimate(keys[first - 1])
+    for (let filled = 0; first > 0 && filled < viewport.current; first -= 1) {
+      filled += heights.px(keys[first - 1]) ?? heights.estimate()
     }
-    const top = first > 0 ? mobileNativeChatSpan(keys, 0, first, estimate) + screen : 0
-    const { scope } = rowKeys
-    return {
-      scope,
-      first: keys[first] ?? '',
-      firstAt: first,
-      last: null,
-      lastAt: n - 1,
-      top,
-      absorb: null
-    }
+    const scope = rowKeys.scope
+    return { scope, first: keys[first] ?? '', firstAt: first, last: null, lastAt: n - 1, slack: 0, measure: null }
   }
-  // A chat opens at its end, and so do rows arriving where there were none.
-  const kept = w.current?.scope === rowKeys.scope && w.current.first !== ''
-  let win = kept && w.current ? w.current : seatAtEnd()
+
+  const kept = w.current?.scope === rowKeys.scope && w.current.first !== '' ? w.current : null
+  let win = kept ?? seatAtEnd()
   let end = win.last === null ? n : at(win.last, win.lastAt) + 1
   if (following && win.last !== null) {
-    // Following draws the end; from far up that is a new window there.
     win = end >= n ? { ...win, last: null } : seatAtEnd()
     end = n
   }
   const start = Math.min(at(win.first, win.firstAt), Math.max(0, end - 1))
   end = Math.min(n, Math.max(end, start + 1))
-  const above = mobileNativeChatSpan(keys, 0, start, estimate)
-  // Room for rows taller than estimated, while rows remain above.
-  const settled = start > 0 ? above + screen : 0
-  const top = following ? settled : Math.max(0, win.top)
-  const bottom = mobileNativeChatSpan(keys, end, n, estimate)
 
-  const atRest = (): boolean =>
-    !motion.current.touching && Date.now() - motion.current.lastScroll >= REST_MS
-  const rest = useCallback(() => {
-    const m = motion.current
-    const wait = REST_MS - (Date.now() - m.lastScroll)
-    m.timer = m.touching || wait <= 0 ? undefined : setTimeout(rest, wait)
-    if (!m.touching && wait <= 0) {
-      m.owed = false
+  const d = drawn.current
+  const sourceChanged = d !== null && d.sourceHead !== rowKeys.sourceHead
+  let slack = following || !kept || settle.current ? 0 : win.slack
+  if (d && sourceChanged && !following && kept && d.keys !== keys) {
+    // A cap trim takes rows from the top; what was drawn of them stays as space until settled.
+    for (let i = d.first; i < d.end && indexOf(rowKeys.current(d.keys[i]!)) === undefined; i += 1) {
+      slack += heights.px(d.keys[i]) ?? 0
+    }
+  }
+  // A source change keeps no measuring rows: the place-hold owns that commit's correction.
+  let [m0, m1] = [start, start]
+  const group = sourceChanged || !win.measure ? null : win.measure
+  if (group) {
+    const [from, to] = [at(group.from, group.fromAt), at(group.to, group.toAt) + 1]
+    if (from < to && to <= start) {
+      ;[m0, m1] = [from, to]
+    }
+  }
+  let mid = 0
+  for (let i = m1; i < start; i += 1) {
+    mid += heights.px(keys[i]) ?? 0
+  }
+  let first = m0
+  let above = slack
+  for (let px = heights.px(keys[first - 1]); first > 0 && px !== undefined; ) {
+    above += px
+    first -= 1
+    px = heights.px(keys[first - 1])
+  }
+  let bottom = 0
+  for (let i = end; i < n; i += 1) {
+    bottom += heights.px(keys[i]) ?? heights.estimate()
+  }
+  const measuring = n > 0 && Math.min(m0, start) > 0 && heights.px(keys[0]) === undefined
+
+  const write = useCallback(
+    (s: MobileNativeChatWindowScroller, to: number) => {
+      const target = Math.max(0, Math.min(to, s.scrollHeight - s.clientHeight))
+      if (Math.abs(target - s.scrollTop) >= 0.5) {
+        motion.wrote(target)
+        s.scrollTop = target
+      }
+    },
+    [motion]
+  )
+
+  const takeAnchor = useCallback((s: MobileNativeChatWindowScroller) => {
+    const at = drawn.current
+    const view = s.getBoundingClientRect().top
+    let [low, high] = [at?.start ?? 0, at?.end ?? 0]
+    while (low < high) {
+      const middle = low + Math.floor((high - low) / 2)
+      const node = nodes.current.get(at!.keys[middle]!)
+      if (!node || node.getBoundingClientRect().bottom <= view) {
+        low = middle + 1
+      } else {
+        high = middle
+      }
+    }
+    const key = at?.keys[low]
+    const node = key === undefined ? undefined : nodes.current.get(key)
+    anchor.current = key && node ? { key, top: node.getBoundingClientRect().top - view } : null
+  }, [])
+
+  const cover = useCallback(
+    (s: MobileNativeChatWindowScroller) => {
+      const [at, cur] = [drawn.current, w.current]
+      const firstNode = at && nodes.current.get(at.keys[at.start] ?? '')
+      if (!at || !cur || !firstNode) {
+        return
+      }
+      const next = coverMobileNativeChatWindow(
+        {
+          n: at.keys.length,
+          start: at.start,
+          end: at.end,
+          following: at.following,
+          windowTop:
+            firstNode.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop,
+          scrollTop: s.scrollTop,
+          viewport: s.clientHeight
+        },
+        (i) => heights.px(at.keys[i]),
+        heights.estimate()
+      )
+      if (next) {
+        const last = next.end >= at.keys.length ? null : at.keys[next.end - 1]!
+        const measure = next.start === at.start ? cur.measure : null
+        const moved = { first: at.keys[next.start]!, firstAt: next.start, last, lastAt: next.end - 1 }
+        w.current = { ...cur, ...moved, measure }
+        render()
+      }
+    },
+    [heights, render]
+  )
+
+  // Owed work that can move rows above the reader, done only while settled: measure the nearest rows
+  // that are unmeasured or may have changed, and give back trimmed space.
+  const measureOwed = useCallback(() => {
+    const [at, cur] = [drawn.current, w.current]
+    if (!at || !cur || at.keys.length === 0) {
+      return
+    }
+    const unmeasured = at.first > 0 || cur.measure !== null
+    const since = Date.now() - lastScan.current
+    if (!unmeasured && cur.slack === 0 && since < STALE_SCAN_MS) {
+      rescan.current ??= setTimeout(() => {
+        rescan.current = undefined
+        motion.poke()
+      }, STALE_SCAN_MS - since)
+      return
+    }
+    lastScan.current = Date.now()
+    const shape = `${at.layoutKey}:${width.current}`
+    const valid = (i: number): boolean =>
+      heights.valid(at.keys[i]!, at.rows[i]!, at.rowState(i, at.rows[i]!), shape)
+    let [i, distance] = [at.start - 1, 0]
+    for (; i >= 0 && valid(i); i -= 1) {
+      distance += heights.px(at.keys[i]) ?? 0
+    }
+    let measure: Group | null = null
+    if (i >= 0 && (at.following || distance <= MEASURE_REACH * viewport.current)) {
+      let from = i
+      while (from > 0 && i - from + 1 < MEASURE_ROWS && !valid(from - 1)) {
+        from -= 1
+      }
+      measure = { from: at.keys[from]!, fromAt: from, to: at.keys[i]!, toAt: i }
+    }
+    if (measure || cur.slack > 0 || cur.measure) {
+      w.current = { ...cur, measure }
+      settle.current = true
       render()
     }
-  }, [render])
-  const arm = useCallback(() => {
-    const m = motion.current
-    m.owed = true
-    if (m.timer === undefined && !m.touching) {
-      m.timer = setTimeout(rest, REST_MS)
-    }
-  }, [rest])
-
-  const cover = useCallback((): boolean => {
-    const d = drawn.current
-    const s = scroller()
-    const cells = s ? drawnBoxes(s).slice(0, -1) : []
-    if (!s || !w.current || cells.length === 0) {
-      return false
-    }
-    if (s.clientWidth !== measured.current.width) {
-      forget({ width: s.clientWidth })
-    }
-    cells.forEach((box, i) => remember(d.keys[d.start + i], boxHeight(box)))
-    viewport.current = s.clientHeight
-    const next = coverMobileNativeChatWindow(
-      d,
-      cells,
-      s.getBoundingClientRect(),
-      s.clientHeight,
-      estimate
-    )
-    if (!next) {
-      return false
-    }
-    const last = next.last >= d.keys.length ? null : d.keys[next.last - 1]!
-    w.current = {
-      ...w.current,
-      first: d.keys[next.first]!,
-      firstAt: next.first,
-      last,
-      lastAt: next.last - 1,
-      top: next.top,
-      absorb: next.absorb ? d.keys[d.start]! : null
-    }
-    render()
-    return true
-  }, [estimate, forget, remember, render, scroller])
+  }, [heights, motion, render])
 
   useLayoutEffect(() => {
-    const m = motion.current
-    if (w.current?.scope !== win.scope || measured.current.layoutKey !== layoutKey) {
-      forget({ layoutKey })
+    onSettled.current = measureOwed
+    if (w.current && w.current.scope !== rowKeys.scope) {
+      heights.clear()
+      motion.release()
+      anchor.current = null
     }
     const last = end >= n ? null : keys[end - 1]!
-    w.current = {
-      ...win,
-      first: keys[start] ?? '',
-      firstAt: start,
-      last,
-      lastAt: end - 1,
-      top,
-      absorb: null
-    }
-    drawn.current = { keys, start, end, top, following }
+    const measure = m0 < m1 ? { from: keys[m0]!, fromAt: m0, to: keys[m1 - 1]!, toAt: m1 - 1 } : null
+    w.current = { ...win, first: keys[start] ?? '', firstAt: start, last, lastAt: end - 1, slack, measure }
+    const sourceHead = rowKeys.sourceHead
+    drawn.current = { keys, rows, indexOf, rowState, start, end, first, sourceHead, following, layoutKey }
+    settle.current = false
     const s = scroller()
-    if (!s || n === 0) {
-      return
+    if (s && anchorStale.current) {
+      anchorStale.current = false
+      takeAnchor(s)
     }
-    if (m.writeTo !== null) {
-      s.scrollTop = m.writeTo
-      m.writeTo = null
+    if (n > 0) {
+      motion.poke()
     }
-    if (win.absorb !== null && !following) {
-      // The spacer gives up exactly their height, so nothing moves.
-      const cells = drawnBoxes(s)
-      const added = Math.min((indexOf.get(win.absorb) ?? start) - start, cells.length)
-      let px = cells.slice(0, added).reduce((sum, box) => sum + boxHeight(box), 0)
-      let cut = 0
-      for (; cut < added && px > top; cut += 1) {
-        // More than the spacer holds: undrawn until rest makes room.
-        remember(keys[start + cut], boxHeight(cells[cut]!))
-        px -= boxHeight(cells[cut]!)
-      }
-      w.current = { ...w.current, first: keys[start + cut]!, firstAt: start + cut, top: top - px }
-      render()
-      return
-    }
-    // The place-hold's correction: the spacer takes it if it can, else a write once at rest.
-    if (!following && m.drift !== 0 && top - m.drift >= 0) {
-      w.current.top = top - m.drift
-      m.drift = 0
-      render()
-      return
-    }
-    m.drift = following ? 0 : m.drift
-    if (cover() || following) {
-      return
-    }
-    const settle = start > 0 && top - above >= screen / 2 ? 0 : settled - top
-    if (m.drift === 0 && Math.abs(settle) < 0.5) {
-      return
-    }
-    if (!atRest()) {
-      arm()
-      return
-    }
-    const to = s.scrollTop + m.drift + settle
-    m.drift = 0
-    if (Math.abs(settle) < 0.5) {
-      s.scrollTop = to
-      return
-    }
-    m.writeTo = to
-    w.current.top = top + settle
-    render()
   })
 
   useLayoutEffect(() => {
     const s = scroller()
-    const m = motion.current
-    const down = () => {
-      m.touching = true
-      clearTimeout(m.timer)
-      m.timer = undefined
-    }
-    const up = () => {
-      m.touching = false
-      if (m.owed) {
-        arm()
+    const scrolled = () => {
+      if (s) {
+        motion.scrolled(s.scrollTop)
+        takeAnchor(s)
+        cover(s)
       }
     }
-    // Not RN Web's throttled `onScroll`, which can drop the event after a jump.
-    const scrolled = () => {
-      m.lastScroll = Date.now()
-      cover()
-    }
     const listeners = [
-      ['touchstart', down],
-      ['touchend', up],
-      ['touchcancel', up],
+      ['touchstart', () => motion.touch(true)],
+      ['touchend', () => motion.touch(false)],
+      ['touchcancel', () => motion.touch(false)],
       ['scroll', scrolled]
     ] as const
     listeners.forEach(([type, listener]) => s?.addEventListener(type, listener, { passive: true }))
     return () => {
       listeners.forEach(([type, listener]) => s?.removeEventListener(type, listener))
-      clearTimeout(m.timer)
+      clearTimeout(rescan.current)
+      motion.release()
     }
-  }, [scroller, arm, cover])
+  }, [scroller, motion, takeAnchor, cover])
 
-  const keepInPlace = useCallback((drift: number) => {
-    motion.current.drift += drift
+  /** The one observer's entries: rows measured, then, for a settled parked reader, whatever moved the
+   *  row they were reading goes back (a measured row, the header, given-back space). */
+  const afterResize = useCallback(
+    (entries: readonly ResizeObserverEntry[]) => {
+      const [s, at] = [scroller(), drawn.current]
+      if (!s || !at) {
+        return
+      }
+      viewport.current = s.clientHeight
+      width.current = s.clientWidth
+      const shape = `${at.layoutKey}:${width.current}`
+      for (const entry of entries) {
+        const key = nodeKeys.current.get(entry.target)
+        const i = at.indexOf(key)
+        if (key !== undefined && i !== undefined) {
+          const row = at.rows[i]!
+          heights.remember(key, entry.contentRect.height, row, at.rowState(i, row), shape)
+        }
+      }
+      const held = anchor.current && nodes.current.get(anchor.current.key)
+      if (!at.following && motion.settled() && anchor.current && held) {
+        const view = s.getBoundingClientRect().top
+        write(s, s.scrollTop + held.getBoundingClientRect().top - view - anchor.current.top)
+      }
+      cover(s)
+      motion.poke()
+    },
+    [scroller, heights, motion, write, cover]
+  )
+
+  /** The place-hold's correction: written only while settled. Mid-motion the reader already saw the
+   *  move, and putting it back at rest would be a second jump. */
+  const keepInPlace = useCallback(
+    (drift: number) => {
+      const s = scroller()
+      if (s && !drawn.current?.following && motion.settled()) {
+        write(s, s.scrollTop + drift)
+        anchorStale.current = true
+      }
+    },
+    [scroller, motion, write]
+  )
+
+  const observeWith = useCallback((next: ResizeObserver | null) => {
+    observer.current = next
+    nodes.current.forEach((node) => next?.observe(node))
   }, [])
-  const coverAfterResize = useCallback(() => void cover(), [cover])
 
-  return { start, end, top, bottom, cover: coverAfterResize, keepInPlace }
+  const rowRef = useCallback((key: string) => {
+    let ref = refs.current.get(key)
+    if (!ref) {
+      ref = (node: unknown) => {
+        const was = nodes.current.get(key)
+        if (was) {
+          observer.current?.unobserve(was)
+          nodes.current.delete(key)
+        }
+        if (isElement(node)) {
+          nodes.current.set(key, node)
+          nodeKeys.current.set(node, key)
+          observer.current?.observe(node)
+        } else {
+          refs.current.delete(key)
+        }
+      }
+      refs.current.set(key, ref)
+    }
+    return ref
+  }, [])
+
+  const settled = useCallback(() => motion.whenSettled(), [motion])
+  const wrote = useCallback((target: number) => motion.wrote(target), [motion])
+
+  return {
+    view: { m0, m1, start, end, above, mid, bottom, measuring },
+    rowRef,
+    list: { afterResize, keepInPlace, observeWith, settled, wrote }
+  }
 }

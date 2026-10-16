@@ -29,7 +29,7 @@ type PageScroller = Element & MobileNativeChatScrollNode & { getInnerViewNode: (
  *  driven by that report. An observer on the scroller and its content runs before that paint. */
 function observePageResize(
   scroller: PageScroller | null | undefined,
-  onResize: () => void
+  onResize: (entries: readonly ResizeObserverEntry[]) => void
 ): ResizeObserver | null {
   if (!scroller || typeof ResizeObserver === 'undefined') {
     return null
@@ -54,10 +54,14 @@ export type MobileNativeChatListHandle = {
   getScrollableNode: () => PageScroller | null | undefined
   scrollToOffset: (params: { animated: boolean; offset: number }) => void
   scrollToEnd: (params: { animated: boolean }) => void
-  /** Page only: runs after the end pin on each resize. */
-  afterResize?: () => void
+  /** Page only: runs after the end pin on each resize, with the observer's entries. */
+  afterResize?: (entries: readonly ResizeObserverEntry[]) => void
+  /** Page only: the list's rows join the one observer, so each reports its own height. */
+  observeWith?: (observer: ResizeObserver | null) => void
   /** Page only: the place-hold's correction, never written while the reader moves. */
   keepInPlace?: (drift: number) => void
+  /** Page only: resolves once the reader stops moving the list, or the list goes away. */
+  settled?: () => Promise<void>
 }
 
 export type MobileNativeChatTailFollow = {
@@ -159,12 +163,14 @@ export function useMobileNativeChatTailFollow(args: {
       listRef.current = list
       const page = !listReportsGestures()
       const observer = page
-        ? observePageResize(list?.getScrollableNode(), () => {
+        ? observePageResize(list?.getScrollableNode(), (entries) => {
             pinPageToEnd()
-            list?.afterResize?.()
+            list?.afterResize?.(entries)
           })
         : null
+      list?.observeWith?.(observer)
       return () => {
+        list?.observeWith?.(null)
         observer?.disconnect()
         listRef.current = null
       }

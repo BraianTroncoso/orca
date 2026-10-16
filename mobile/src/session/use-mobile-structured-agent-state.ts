@@ -84,7 +84,8 @@ export function useMobileStructuredAgentState(args: {
   /** The whole queue's pause, published with the drafts. */
   queuePause: MobileQueuePause
   olderPages: OlderPagePhase
-  loadEarlier: () => void
+  /** `settled`: the page waits for it before it lands (the phone page, until the reader stops). */
+  loadEarlier: (settled?: () => Promise<void>) => void
 } {
   const { client, connected, enabled, sessionId, sessionKey } = args
   // Keep a bounded cache so offline tab switches select the right transcript
@@ -233,7 +234,7 @@ export function useMobileStructuredAgentState(args: {
     supersede
   ])
 
-  const loadEarlier = useCallback(() => {
+  const loadEarlier = useCallback((settled?: () => Promise<void>) => {
     const start = oldestStructuredAgentSessionCursor(stateRef.current)
     if (!client || !sessionId || !sessionKey || !stateRef.current.hasOlder || !start) {
       return
@@ -268,6 +269,10 @@ export function useMobileStructuredAgentState(args: {
         return isFinalAgentSessionReadRefusal(agentSessionReadFailureRefusal(error))
           ? 'unavailable'
           : 'failed'
+      }
+      // Lands once the reader stops scrolling, so nothing grows above them mid-fling.
+      if (settled) {
+        await settled()
       }
       if (!isCurrent()) {
         return 'end'

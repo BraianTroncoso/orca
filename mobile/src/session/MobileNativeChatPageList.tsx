@@ -20,7 +20,6 @@ import { styles } from './mobile-native-chat-view-styles'
 import { MobileNativeChatPageScroll } from './MobileNativeChatPageScroll'
 import type { MobileNativeChatListHandle } from './use-mobile-native-chat-tail-follow'
 import {
-  MOBILE_NATIVE_CHAT_WINDOW_ID,
   useMobileNativeChatPageWindow,
   type MobileNativeChatWindowScroller
 } from './use-mobile-native-chat-page-window'
@@ -32,10 +31,13 @@ type Props = {
   endAnchored: boolean
   pin: () => void
   rows: readonly NativeChatMessage[]
-  rowKeys: Pick<MobileNativeChatRowKeys, 'scope' | 'keyOf' | 'current'>
+  rowKeys: Pick<MobileNativeChatRowKeys, 'scope' | 'sourceHead' | 'keyOf' | 'current'>
   renderItem: (row: Row) => ReactElement
+  /** What a row draws besides itself; a height measured for other state no longer holds. */
+  rowState: (index: number, row: NativeChatMessage) => object
   layoutKey: string
-  header: ReactElement | null
+  /** `measuring`: rows above are not measured yet, so the Load earlier slot shows loading. */
+  header: (measuring: boolean) => ReactElement | null
   footer: ReactElement | null
   emptyStateView: ReactElement | null
   onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void
@@ -50,6 +52,7 @@ export function MobileNativeChatPageList({
   rows,
   rowKeys,
   renderItem,
+  rowState,
   layoutKey,
   header,
   footer,
@@ -61,28 +64,45 @@ export function MobileNativeChatPageList({
     (): MobileNativeChatWindowScroller | null | undefined => scroll.current?.getScrollableNode(),
     []
   )
-  const view = useMobileNativeChatPageWindow({
+  const { view, rowRef, list } = useMobileNativeChatPageWindow({
     rows,
     rowKeys,
+    rowState,
     following: endAnchored,
     layoutKey,
     scroller
   })
-  const { cover, keepInPlace } = view
   useImperativeHandle(
     ref,
     () => ({
       getScrollableNode: () => scroll.current?.getScrollableNode(),
-      scrollToOffset: ({ offset, animated }) => scroll.current?.scrollTo({ y: offset, animated }),
+      scrollToOffset: ({ offset, animated }) => {
+        list.wrote(offset)
+        scroll.current?.scrollTo({ y: offset, animated })
+      },
       scrollToEnd: (params) => scroll.current?.scrollToEnd(params),
-      afterResize: cover,
-      keepInPlace
+      ...list
     }),
-    [cover, keepInPlace]
+    [list]
   )
-  // After the handle attaches, so a chat's first paint is at its end.
-  useLayoutEffect(() => pin())
+  // After the handle attaches, so a chat's first paint is at its end; later growth the observer pins.
+  const opened = useRef('')
+  const shown = `${rowKeys.scope}:${rows.length > 0}`
+  useLayoutEffect(() => {
+    if (opened.current !== shown) {
+      opened.current = shown
+      pin()
+    }
+  }, [shown, pin])
 
+  const drawRow = (item: NativeChatMessage, index: number) => {
+    const key = rowKeys.keyOf(item)
+    return (
+      <View key={key} ref={rowRef(key)}>
+        {renderItem({ item, index })}
+      </View>
+    )
+  }
   return (
     <MobileNativeChatPageScroll
       ref={scroll}
@@ -94,15 +114,15 @@ export function MobileNativeChatPageList({
       onScroll={onScroll}
       scrollEventThrottle={32}
     >
-      {header}
+      {header(view.measuring)}
       {rows.length === 0 ? (
         emptyStateView
       ) : (
-        <View testID={MOBILE_NATIVE_CHAT_WINDOW_ID}>
-          <View style={[pageList.spacer, { height: view.top }]} />
-          {rows.slice(view.start, view.end).map((item, at) => (
-            <View key={rowKeys.keyOf(item)}>{renderItem({ item, index: view.start + at })}</View>
-          ))}
+        <View>
+          <View style={[pageList.spacer, { height: view.above }]} />
+          {rows.slice(view.m0, view.m1).map((item, at) => drawRow(item, view.m0 + at))}
+          <View style={[pageList.spacer, { height: view.mid }]} />
+          {rows.slice(view.start, view.end).map((item, at) => drawRow(item, view.start + at))}
           <View style={[pageList.spacer, { height: view.bottom }]} />
         </View>
       )}

@@ -46,7 +46,8 @@ export type MobileNativeChatSession = {
   /** The Load earlier control's state: reading now, or how the last read ended. */
   olderPages?: OlderPagePhase
   /** Grow the window to page in older history. */
-  loadEarlier: () => void
+  /** `settled`: the page waits for it before it lands (the phone page, until the reader stops). */
+  loadEarlier: (settled?: () => Promise<void>) => void
 }
 
 // Small first page for a fast first paint; grows by a page as the user scrolls.
@@ -242,7 +243,7 @@ export function useMobileNativeChatSession(args: {
     }
   }, [client, agent, sessionId, transcriptPath, identity, setList, supersede])
 
-  const loadEarlier = useCallback(() => {
+  const loadEarlier = useCallback((settled?: () => Promise<void>) => {
     if (!client || !agent || !sessionId || !hasMore) {
       return
     }
@@ -283,6 +284,11 @@ export function useMobileNativeChatSession(args: {
       if ('error' in result) {
         return 'failed'
       }
+      // The page lands once the reader stops scrolling: rows growing above them mid-fling would move
+      // what they read, and iOS stops the fling on the write that would hold it.
+      if (settled) {
+        await settled()
+      }
       // Lands only on the window and cursor it was asked from; otherwise the window it
       // read against is gone, and the reader pages again from the new one.
       if (
@@ -299,8 +305,11 @@ export function useMobileNativeChatSession(args: {
         setList([...result.messages, ...mergerRef.current.list])
         more = nextLimit < MAX_MESSAGES && (result.hasMore ?? result.messages.length >= pageLimit)
       } else {
-        // Older runtimes ignore the cursor and return the growing tail.
-        setList(result.messages)
+        // Older runtimes ignore the cursor and return the growing tail; rows that streamed in while
+        // it waited stay.
+        const live = mergerRef.current.list
+        const after = live.findIndex((message) => message.id === result.messages.at(-1)?.id)
+        setList(after < 0 ? result.messages : [...result.messages, ...live.slice(after + 1)])
         more = result.messages.length >= nextLimit
       }
       setHasMore(more)
