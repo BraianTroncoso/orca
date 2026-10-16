@@ -245,7 +245,7 @@ export function buildDashboardSnapshot(
         finishedAt,
         stateChangedAt: row.entry.stateStartedAt || row.startedAt,
         statusUpdatedAt: row.entry.updatedAt,
-        // `readAgentRowTurnRecords`, the rule the sidebar card bolds by too.
+        // `isAgentSubjectUnread`, the rule the sidebar card bolds by too.
         unseen,
         askSummary: bucket === 'attention' ? (row.entry.interactivePrompt ?? undefined) : undefined,
         conversationName: boundedLabelOrUndefined(
