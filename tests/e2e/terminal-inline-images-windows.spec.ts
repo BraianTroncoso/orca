@@ -114,6 +114,24 @@ for (const runtime of ['native', 'wsl'] as const) {
           return id
         }
         term.onResize((e: any) => log.push(`${stamp()} resize ${e.cols}x${e.rows}`))
+        const ih = term._core._inputHandler
+        const tracker = ih._dirtyRowTracker
+        const oldClear = tracker.clearRange.bind(tracker)
+        tracker.clearRange = () => { oldClear(); log.push(`${stamp()} clearRange ${tracker.start}-${tracker.end}`) }
+        const oldParse = ih.parse.bind(ih)
+        ih.parse = (data: any, promiseResult?: boolean) => {
+          const paused = ih._parseStack.paused
+          log.push(`${stamp()} parse> len=${data.length} paused=${paused} pr=${promiseResult} y=${term._core.buffer.y}`)
+          const r = oldParse(data, promiseResult)
+          log.push(`${stamp()} parse< ${r ? 'PROMISE' : 'done'} dirty=${tracker.start}-${tracker.end} y=${term._core.buffer.y}`)
+          return r
+        }
+        const rs = term._core._renderService
+        const oldRefresh = rs.refreshRows.bind(rs)
+        rs.refreshRows = (a: number, b: number, sync?: boolean, redraw?: boolean) => { log.push(`${stamp()} refreshRows ${a}-${b} sync=${!!sync} redraw=${!!redraw}`); return oldRefresh(a, b, sync, redraw) }
+        const wb = term._core._writeBuffer
+        const oldFlush = wb.flushSync.bind(wb)
+        wb.flushSync = () => { log.push(`${stamp()} flushSync ${new Error().stack?.split('\n').slice(2, 6).join(' / ')}`); return oldFlush() }
         term.onWriteParsed(() => log.push(`${stamp()} writeParsed y=${term._core.buffer.y}`))
       })
       const marker = 'WINDOWS_INLINE_IMAGES_DONE'
