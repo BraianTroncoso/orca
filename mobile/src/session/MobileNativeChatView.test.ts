@@ -617,7 +617,7 @@ describe('MobileNativeChatView', () => {
     const observers = new Set<(entries: unknown[]) => void>()
     // The browser's resize step, before paint; RN Web's size report comes a task later.
     const resized = () => act(() => observers.forEach((deliver) => deliver([])))
-    const page = () => renderer!.root.findByType('ScrollView' as never)
+    const page = () => renderer!.root.find((node) => node.type === 'ScrollView')
     const loadEarlier = () =>
       renderer!.root.find(
         (node) =>
@@ -693,7 +693,9 @@ describe('MobileNativeChatView', () => {
 
     // What the page's scroller tells the browser: the transcript's wrapper, then the end marker.
     function transcriptStyle(): unknown[] {
-      const [content, marker, ...rest] = page().children as ReactTestInstance[]
+      const [content, marker, ...rest] = page().children.filter(
+        (child): child is ReactTestInstance => typeof child !== 'string'
+      )
       expect(rest).toHaveLength(0)
       expect(marker!.props.style).toEqual({ height: 1 })
       return content!.props.style

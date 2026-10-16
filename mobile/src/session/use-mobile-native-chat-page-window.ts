@@ -242,22 +242,25 @@ export function useMobileNativeChatPageWindow(args: {
 
   useLayoutEffect(() => {
     const s = scroller()
-    const scrolled = () => {
-      if (s) {
-        motion.scrolled(s.scrollTop)
-        takeAnchor(s)
-        cover(s)
-      }
+    if (!s) {
+      return
     }
-    const listeners = [
-      ['touchstart', () => motion.touch(true)],
-      ['touchend', () => motion.touch(false)],
-      ['touchcancel', () => motion.touch(false)],
-      ['scroll', scrolled]
-    ] as const
-    listeners.forEach(([type, listener]) => s?.addEventListener(type, listener, { passive: true }))
+    const scrolled = () => {
+      motion.scrolled(s.scrollTop)
+      takeAnchor(s)
+      cover(s)
+    }
+    const down = () => motion.touch(true)
+    const up = () => motion.touch(false)
+    s.addEventListener('touchstart', down, { passive: true })
+    s.addEventListener('touchend', up, { passive: true })
+    s.addEventListener('touchcancel', up, { passive: true })
+    s.addEventListener('scroll', scrolled, { passive: true })
     return () => {
-      listeners.forEach(([type, listener]) => s?.removeEventListener(type, listener))
+      s.removeEventListener('touchstart', down)
+      s.removeEventListener('touchend', up)
+      s.removeEventListener('touchcancel', up)
+      s.removeEventListener('scroll', scrolled)
       clearTimeout(rescan.current)
       motion.release()
     }

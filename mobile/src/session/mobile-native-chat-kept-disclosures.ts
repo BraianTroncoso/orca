@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useState } from 'react'
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useState,
+  type ReactElement,
+  type ReactNode
+} from 'react'
 
 /** Show more on a tool run: what the reader asked for, and the lines older calls added above. */
 export type MobileNativeChatReveal = { requested: number; before: number; first?: string }
@@ -13,6 +21,12 @@ export type MobileNativeChatKept = {
 /** Provided where rows unmount once scrolled past (the phone page's window); elsewhere rows keep
  *  their own state as before. */
 export const MobileNativeChatKeptContext = createContext<MobileNativeChatKept | null>(null)
+
+/** One chat's kept disclosures; keyed by the chat so another chat starts with none. */
+export function MobileNativeChatKeptScope({ children }: { children: ReactNode }): ReactElement {
+  const [kept] = useState(newMobileNativeChatKept)
+  return createElement(MobileNativeChatKeptContext.Provider, { value: kept }, children)
+}
 
 /** Bounded: a chat read for a day shouldn't carry every disclosure it ever opened. */
 const MAX_KEPT = 512
@@ -34,20 +48,19 @@ export function useMobileNativeChatKept<T>(
     key === undefined ? initial : (map?.get(key) ?? initial)
   )
   const set = useCallback(
-    (next: (current: T) => T) =>
-      setValue((current) => {
-        const updated = next(current)
-        if (map && key !== undefined) {
-          map.delete(key)
-          map.set(key, updated)
-          const oldest = map.size > MAX_KEPT ? map.keys().next().value : undefined
-          if (oldest !== undefined) {
-            map.delete(oldest)
-          }
+    (next: (current: T) => T) => {
+      const updated = next(value)
+      if (map && key !== undefined) {
+        map.delete(key)
+        map.set(key, updated)
+        const oldest = map.size > MAX_KEPT ? map.keys().next().value : undefined
+        if (oldest !== undefined) {
+          map.delete(oldest)
         }
-        return updated
-      }),
-    [map, key]
+      }
+      setValue(updated)
+    },
+    [value, map, key]
   )
   return [value, set]
 }
