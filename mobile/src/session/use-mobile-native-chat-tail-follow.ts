@@ -62,8 +62,8 @@ export type MobileNativeChatListHandle = {
   keepInPlace?: (drift: number) => void
   /** Page only: resolves once the reader stops moving the list, or the list goes away. */
   settled?: () => Promise<void>
-  /** Page only: the reader touched, wheeled or pressed on the list within the last second. */
-  intent?: () => boolean
+  /** Page only: called with each scroll the reader made (not the page's writes or layout). */
+  watchReader?: (fn: ((moved: number, fromEnd: number) => void) | null) => void
 }
 
 export type MobileNativeChatTailFollow = {
@@ -126,8 +126,6 @@ export function useMobileNativeChatTailFollow(args: {
   const atTailRef = useRef(true)
   const userScrollActiveRef = useRef(false)
   const userScrollSettleFrameRef = useRef<number | null>(null)
-  // Page only: what the offsets last said, in place of the gestures RN Web does not report.
-  const pageOffsetRef = useRef(0)
   const scopeKeyRef = useRef(scopeKey)
 
   // Single writer, so the event-time ref and the render flag cannot disagree.
@@ -173,13 +171,24 @@ export function useMobileNativeChatTailFollow(args: {
           })
         : null
       list?.observeWith?.(observer)
+      // The page reports no drag: the list says which scrolls were the reader's, and how far.
+      list?.watchReader?.((moved, fromEnd) => {
+        if (followingRef.current) {
+          if (moved < -PAGE_MOVE_SLOP && fromEnd > PAGE_MOVE_SLOP) {
+            setFollowing(false)
+          }
+        } else if (moved > PAGE_MOVE_SLOP && fromEnd <= AT_TAIL_SLOP) {
+          setFollowing(true)
+        }
+      })
       return () => {
+        list?.watchReader?.(null)
         list?.observeWith?.(null)
         observer?.disconnect()
         listRef.current = null
       }
     },
-    [pinPageToEnd]
+    [pinPageToEnd, setFollowing]
   )
 
   const pinToTail = useCallback(() => {
@@ -210,25 +219,9 @@ export function useMobileNativeChatTailFollow(args: {
 
   const recordScrollMetrics = useCallback(
     (event: NativeScrollEvent) => {
-      const endsAtTail = isAtTail(event)
-      setAtTail(endsAtTail)
-      if (listReportsGestures()) {
-        return
-      }
-      const moved = event.contentOffset.y - pageOffsetRef.current
-      pageOffsetRef.current = event.contentOffset.y
-      if (followingRef.current) {
-        // Only the reader leaves the end: a clamp, or iOS delivering a scroll after rows grew above,
-        // also reads as a move up short of it.
-        const reader = listRef.current?.intent?.() === true
-        if (reader && moved < -PAGE_MOVE_SLOP && distanceFromTail(event) > PAGE_MOVE_SLOP) {
-          setFollowing(false)
-        }
-      } else if (moved > PAGE_MOVE_SLOP && endsAtTail) {
-        setFollowing(true)
-      }
+      setAtTail(isAtTail(event))
     },
-    [setAtTail, setFollowing]
+    [setAtTail]
   )
 
   const jumpToTail = useCallback(() => {
@@ -307,7 +300,6 @@ export function useMobileNativeChatTailFollow(args: {
       return
     }
     jumpToTail()
-    pageOffsetRef.current = listRef.current?.getScrollableNode()?.scrollTop ?? 0
   }, [scopeKey, jumpToTail])
 
   useEffect(() => clearUserScrollSettle, [clearUserScrollSettle])

@@ -1,4 +1,4 @@
-type Scroller = { getBoundingClientRect: () => { top: number } }
+type Scroller = { getBoundingClientRect: () => { top: number }; scrollTop: number }
 
 function isElement(node: unknown): node is Element {
   return typeof Element !== 'undefined' && node instanceof Element
@@ -11,7 +11,8 @@ export class MobileNativeChatPageRows {
   private keys = new WeakMap<Element, string>()
   private refs = new Map<string, (node: unknown) => void>()
   private observer: ResizeObserver | null = null
-  private anchor: { key: string; top: number } | null = null
+  /** `top` from the scroller's top, with the `scrollTop` it was read at. */
+  private anchor: { key: string; top: number; scrollTop: number } | null = null
 
   keyOf(node: Element): string | undefined {
     return this.keys.get(node)
@@ -63,7 +64,8 @@ export class MobileNativeChatPageRows {
     }
     const key = keys[low]
     const node = this.node(key)
-    this.anchor = key && node ? { key, top: node.getBoundingClientRect().top - view } : null
+    const top = node && node.getBoundingClientRect().top - view
+    this.anchor = key && top !== undefined ? { key, top, scrollTop: scroller.scrollTop } : null
   }
 
   /** How far the anchored row has moved since it was taken; null when it isn't drawn. */
@@ -72,6 +74,16 @@ export class MobileNativeChatPageRows {
     return this.anchor && node
       ? node.getBoundingClientRect().top - scroller.getBoundingClientRect().top - this.anchor.top
       : null
+  }
+
+  /** The anchored row moved in the content since it was taken: rows above it changed. */
+  placeMoved(scroller: Scroller): boolean {
+    const node = this.node(this.anchor?.key)
+    if (!this.anchor || !node) {
+      return false
+    }
+    const now = node.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+    return Math.abs(now + scroller.scrollTop - this.anchor.top - this.anchor.scrollTop) >= 0.5
   }
 
   forgetAnchor(): void {

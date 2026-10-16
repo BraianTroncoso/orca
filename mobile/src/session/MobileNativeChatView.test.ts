@@ -23,9 +23,8 @@ const pageScroller = vi.hoisted(() => {
     removeEventListener: (type: string, listener: () => void) => {
       listeners.get(type)?.delete(listener)
     },
-    // The reader's finger on the page: down and up.
-    touch: () =>
-      ['touchstart', 'touchend'].forEach((type) => listeners.get(type)?.forEach((l) => l()))
+    // The browser's scroll event at the scroller's current position.
+    scroll: () => listeners.get('scroll')?.forEach((listener) => listener())
   }
 })
 const getScrollableNode = vi.hoisted(() => () => pageScroller)
@@ -660,12 +659,20 @@ describe('MobileNativeChatView', () => {
       return scrollEvent(y, contentHeight)
     }
 
+    // RN Web's report and the scroller's own event, for one position.
+    function scrollTo(y: number, contentHeight: number) {
+      act(() => {
+        page().props.onScroll(scrolledTo(y, contentHeight))
+        pageScroller.scroll()
+      })
+    }
+
     it('holds a following reader at the live end through growth and a smaller viewport', async () => {
       const latest = [assistantTurn('a1', 'Latest')]
       const landed = [assistantTurn('a0', 'Older'), ...latest]
       const onLoadEarlier = vi.fn()
       await render({ folded: latest, hasMore: true, onLoadEarlier })
-      act(() => page().props.onScroll(scrolledTo(500, 1_000)))
+      scrollTo(500, 1_000)
 
       // Older rows land; the observer pins before paint.
       act(() => loadEarlier().props.onPress())
@@ -677,21 +684,21 @@ describe('MobileNativeChatView', () => {
       expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 4_500 })
 
       // The pin's own move, short of a reply that grew meanwhile, is not the reader's.
-      act(() => page().props.onScroll(scrolledTo(4_500, 5_400)))
+      scrollTo(4_500, 5_400)
       resized()
       expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 4_900 })
 
-      // A move up with no touch (a clamp, or iOS delivering a scroll after rows grew) still follows.
-      act(() => page().props.onScroll(scrolledTo(3_000, 5_400)))
+      // The browser clamping the scroll to a shorter end is layout's, not the reader's: it still
+      // follows, and the next growth pins.
+      scrollTo(3_500, 4_000)
+      pageScroller.scrollHeight = 5_400
       resized()
       expect(scrollToOffset).toHaveBeenCalledTimes(3)
-      act(() => page().props.onScroll(scrolledTo(4_900, 5_400)))
+      expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 4_900 })
+      scrollTo(4_900, 5_400)
 
-      // The reader's touch, then a move up, leaves the end.
-      act(() => {
-        pageScroller.touch()
-        page().props.onScroll(scrolledTo(3_000, 5_400))
-      })
+      // Nothing explains this move up but the reader: it leaves the end.
+      scrollTo(3_000, 5_400)
       pageScroller.scrollHeight = 6_000
       resized()
       expect(scrollToOffset).toHaveBeenCalledTimes(3)
@@ -700,7 +707,7 @@ describe('MobileNativeChatView', () => {
       ).toHaveLength(1)
 
       // Back at the end it follows again, and a smaller viewport pins to the live end.
-      act(() => page().props.onScroll(scrolledTo(5_500, 6_000)))
+      scrollTo(5_500, 6_000)
       pageScroller.scrollHeight = 6_400
       resized()
       expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 5_900 })
@@ -725,19 +732,17 @@ describe('MobileNativeChatView', () => {
       const jumps = () =>
         renderer!.root.findAll((node) => node.props.accessibilityLabel === 'Scroll to latest')
       await render({ folded: turns.slice(0, 3) })
-      act(() => page().props.onScroll(scrolledTo(500, 1_000)))
+      scrollTo(500, 1_000)
 
       // Trim plus append of the same height: no size change, so the owner rightly does nothing.
       await update({ folded: turns.slice(1) })
       expect(scrollToOffset).not.toHaveBeenCalled()
       expect(jumps()).toHaveLength(0)
       expect(transcriptStyle()).toContainEqual({ overflowAnchor: 'none' })
+      resized()
 
       // Parked, the browser may anchor a message again; the jump back follows the end once more.
-      act(() => {
-        pageScroller.touch()
-        page().props.onScroll(scrolledTo(300, 1_000))
-      })
+      scrollTo(300, 1_000)
       expect(transcriptStyle()).not.toContainEqual({ overflowAnchor: 'none' })
       act(() => jumps()[0]!.props.onPress())
       expect(transcriptStyle()).toContainEqual({ overflowAnchor: 'none' })

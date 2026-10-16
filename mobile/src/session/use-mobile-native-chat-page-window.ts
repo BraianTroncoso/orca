@@ -76,6 +76,7 @@ export function useMobileNativeChatPageWindow(args: {
   const settle = useRef(false)
   const [drawnRows] = useState(() => new MobileNativeChatPageRows())
   const anchorStale = useRef(false)
+  const readerMoved = useRef<((moved: number, fromEnd: number) => void) | null>(null)
   const width = useRef(0)
   const viewport = useRef(globalThis.innerHeight || 800)
   const lastScan = useRef(0)
@@ -135,8 +136,11 @@ export function useMobileNativeChatPageWindow(args: {
 
   const write = useCallback(
     (s: MobileNativeChatWindowScroller, to: number) => {
-      const target = Math.max(0, Math.min(to, s.scrollHeight - s.clientHeight))
-      if (Math.abs(target - s.scrollTop) >= 0.5) {
+      const max = s.scrollHeight - s.clientHeight
+      const target = Math.max(0, Math.min(to, max))
+      // iOS still bouncing past an end: a write then lands while WebKit owns the scroll.
+      const bouncing = s.scrollTop < 0 || s.scrollTop > max + 1
+      if (!bouncing && Math.abs(target - s.scrollTop) >= 0.5) {
         motion.wrote(target)
         s.scrollTop = target
       }
@@ -238,6 +242,7 @@ export function useMobileNativeChatPageWindow(args: {
       anchorStale.current = false
       takeAnchor(s)
     }
+    motion.laidOut([n, m0, m1, start, end, above, mid, bottom, layoutKey].join(':'))
     if (n > 0) {
       motion.poke()
     }
@@ -249,11 +254,14 @@ export function useMobileNativeChatPageWindow(args: {
       return
     }
     const scrolled = () => {
-      // A write's or a clamp's event can arrive after rows above changed and before the correction:
+      // A write's or layout's event can arrive after rows above changed and before the correction:
       // taking the place or covering then would keep the moved position and draw what moved it.
-      if (motion.scrolled(s.scrollTop)) {
+      const max = s.scrollHeight - s.clientHeight
+      const { by, moved } = motion.scrolled(s.scrollTop, max, () => drawnRows.placeMoved(s))
+      if (by === 'reader') {
         takeAnchor(s)
         cover(s)
+        readerMoved.current?.(moved, max - s.scrollTop)
       }
     }
     const detach = motion.attach(s)
@@ -264,7 +272,7 @@ export function useMobileNativeChatPageWindow(args: {
       clearTimeout(rescan.current)
       motion.release()
     }
-  }, [scroller, motion, takeAnchor, cover])
+  }, [scroller, motion, takeAnchor, cover, drawnRows])
 
   /** The one observer's entries: rows measured, then, for a settled parked reader, whatever moved the
    *  row they were reading goes back (a measured row, the header, given-back space). */
@@ -289,10 +297,14 @@ export function useMobileNativeChatPageWindow(args: {
       if (drift !== null) {
         write(s, s.scrollTop + drift)
       }
+      // The place is where the reader is now: a correction that couldn't land, or a move while
+      // they scrolled, is not owed later.
+      takeAnchor(s)
+      motion.reconciled(s.scrollTop)
       cover(s)
       motion.poke()
     },
-    [scroller, heights, motion, write, cover, drawnRows]
+    [scroller, heights, motion, write, cover, drawnRows, takeAnchor]
   )
 
   /** The place-hold's correction: written only while settled. Mid-motion the reader already saw the
@@ -302,11 +314,10 @@ export function useMobileNativeChatPageWindow(args: {
       const s = scroller()
       if (s && !drawn.current?.following && motion.settled()) {
         write(s, s.scrollTop + drift)
-        takeAnchor(s)
         anchorStale.current = true
       }
     },
-    [scroller, motion, write, takeAnchor]
+    [scroller, motion, write]
   )
 
   // Stable, so the list's handle (and with it the one observer) is made once.
@@ -315,8 +326,10 @@ export function useMobileNativeChatPageWindow(args: {
       afterResize,
       keepInPlace,
       observeWith: drawnRows.observeWith,
-      intent: () => motion.intent(),
       settled: () => motion.whenSettled(),
+      watchReader: (fn: ((moved: number, fromEnd: number) => void) | null) => {
+        readerMoved.current = fn
+      },
       wrote: (target: number) => motion.wrote(target)
     }),
     [afterResize, keepInPlace, drawnRows, motion]
