@@ -41,6 +41,8 @@ describe('getWorktreeCardDetails', () => {
       getWorktreeCardDetails(chosen, { compactWorktreeCards: false, newCardStyle: false })
     ).toMatchObject({
       compactCards: false,
+      repoInTitle: false,
+      metaRow: true,
       pr: true,
       host: true,
       inlineAgents: true,
@@ -48,7 +50,14 @@ describe('getWorktreeCardDetails', () => {
     })
     expect(
       getWorktreeCardDetails(chosen, { compactWorktreeCards: true, newCardStyle: false })
-    ).toMatchObject({ compactCards: true, pr: true, host: false, inlineAgents: false })
+    ).toMatchObject({
+      compactCards: true,
+      repoInTitle: true,
+      metaRow: false,
+      pr: true,
+      host: false,
+      inlineAgents: false
+    })
   })
 
   it('lets the new card style override the Compact layout', () => {
@@ -57,6 +66,13 @@ describe('getWorktreeCardDetails', () => {
         compactWorktreeCards: true,
         newCardStyle: true
       })
-    ).toMatchObject({ compactCards: false, host: true, inlineAgents: true })
+    ).toMatchObject({
+      compactCards: false,
+      // The new card style keeps a meta row but uses the title chip for the repo.
+      repoInTitle: true,
+      metaRow: true,
+      host: true,
+      inlineAgents: true
+    })
   })
 })

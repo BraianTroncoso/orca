@@ -1,3 +1,5 @@
+import { AgentHookStartup } from '../shared/agent-hook-startup'
+import { bindRelayHookServer } from './agent-hook-server-bind'
 import {
   inferRelayClaudeInterrupt,
   type RelayInterruptHost
@@ -12,7 +14,7 @@ import type {
 } from './agent-hook-server-contract'
 import { handleRelayHookRequest } from './agent-hook-request'
 import { RelayAgentPresence } from './relay-agent-presence'
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import type { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
@@ -37,10 +39,10 @@ import {
 import { REMOTE_AGENT_HOOK_ENV, type AgentHookSource } from '../shared/agent-hook-relay'
 import type { SpoolRecord } from '../shared/agent-hook-spool'
 import { buildRelayHookPtyEnv, defaultEndpointDir } from './agent-hook-endpoint-coordinates'
-import { buildRelayHookEnvelope } from './agent-hook-envelope-build'
 import { drainRelayHookSpool, ingestRelayHookSpoolRecord } from './agent-hook-spool-ingest'
 import { AgentHookResultRetryScheduler } from './agent-hook-result-retry-scheduler'
 import {
+  buildCachedPaneReplayEnvelope,
   selectReplayableCachedPanes,
   type CachedPaneEnvelopeMeta
 } from './agent-hook-cached-pane-status'
@@ -48,6 +50,7 @@ import { createRelayClaudeTerminalInterrupts } from './claude-terminal-interrupt
 
 export class RelayAgentHookServer extends RelayAgentHookCanonicalStatus {
   private server: ReturnType<typeof createServer> | null = null
+  private readonly startup = new AgentHookStartup()
   private port = 0
   private token = ''
   private env: string
@@ -104,7 +107,14 @@ export class RelayAgentHookServer extends RelayAgentHookCanonicalStatus {
     })
   }
 
-  async start(options: RelayHookServerStartOptions = {}): Promise<void> {
+  start(options: RelayHookServerStartOptions = {}): Promise<void> {
+    return this.startup.start((isCurrent) => this.startListener(options, isCurrent))
+  }
+
+  private async startListener(
+    options: RelayHookServerStartOptions,
+    isCurrent: () => boolean
+  ): Promise<void> {
     if (this.server) {
       return
     }
@@ -112,51 +122,47 @@ export class RelayAgentHookServer extends RelayAgentHookCanonicalStatus {
     this.token = this.fixedToken ?? randomUUID()
     this.endpointFileWritten = false
     this.portFallbackApplied = false
-    drainRelayHookSpool(this.endpointDir, (record) => this.ingestSpoolRecord(record))
-    try {
-      await this.listenOn(this.preferredPort)
-    } catch (err) {
-      // Why: fall back to an ephemeral port on EADDRINUSE; clients use the endpoint file.
-      if (this.preferredPort > 0 && (err as NodeJS.ErrnoException)?.code === 'EADDRINUSE') {
-        this.portFallbackApplied = true
-        await this.listenOn(0)
-      } else {
-        throw err
-      }
+    await drainRelayHookSpool(this.endpointDir, (record) =>
+      this.ingestSpoolRecord(record, isCurrent)
+    )
+    if (!isCurrent()) {
+      return
     }
-    if (options.publishEndpoint !== false) {
+    await bindRelayHookServer({
+      preferredPort: this.preferredPort,
+      isCurrent,
+      handleRequest: (req, res) =>
+        handleRelayHookRequest(req, res, {
+          isCurrent,
+          token: this.token,
+          env: this.env,
+          state: this.state,
+          providerNormalization: this.providerNormalization,
+          checkAgentPresence: (paneKey) => this.checkAgentPresence(paneKey),
+          isPaneSurfaceRetired: this.isPaneSurfaceRetired,
+          getAgentLaunchToken: this.getAgentLaunchToken,
+          applyEvent: (event, source, env, version) => this.applyEvent(event, source, env, version),
+          ingestTmuxHook: (source, body) => this.ingestCanonicalTmuxHook(source, body, this.env),
+          retryScheduler: this.retryScheduler,
+          transportInterference: this.transportInterference
+        }),
+      setServer: (server) => {
+        this.server = server
+      },
+      setPort: (port) => {
+        this.port = port
+      },
+      onFallback: () => {
+        this.portFallbackApplied = true
+      }
+    })
+    if (isCurrent() && options.publishEndpoint !== false) {
       this.publishEndpointFile()
     }
   }
 
   get usedPortFallback(): boolean {
     return this.portFallbackApplied
-  }
-
-  private listenOn(port: number): Promise<void> {
-    this.server = createServer((req, res) => this.handleRequest(req, res))
-    return new Promise<void>((resolve, reject) => {
-      const onStartupError = (err: Error): void => {
-        this.server?.off('listening', onListening)
-        // Why: clear failed server refs so later start() calls can retry.
-        this.server = null
-        reject(err)
-      }
-      const onListening = (): void => {
-        this.server?.off('error', onStartupError)
-        this.server?.on('error', (err) => {
-          process.stderr.write(`[relay-hook-server] server error: ${err.message}\n`)
-        })
-        const address = this.server!.address()
-        if (address && typeof address === 'object') {
-          this.port = address.port
-        }
-        resolve()
-      }
-      this.server!.once('error', onStartupError)
-      // Why: loopback only — reachable by the in-box agent CLI (127.0.0.1), not from outside the box.
-      this.server!.listen(port, '127.0.0.1', onListening)
-    })
   }
 
   publishEndpointFile(): boolean {
@@ -176,6 +182,7 @@ export class RelayAgentHookServer extends RelayAgentHookCanonicalStatus {
   }
 
   stop(): void {
+    this.startup.stop()
     this.server?.close()
     this.server = null
     this.port = 0
@@ -201,9 +208,7 @@ export class RelayAgentHookServer extends RelayAgentHookCanonicalStatus {
     })
     for (const { event, meta } of replayable) {
       void this.checkAgentPresence(event.paneKey)
-      this.forward(
-        buildRelayHookEnvelope(event, meta.source, meta.env, meta.version, { isReplay: true })
-      )
+      this.forward(buildCachedPaneReplayEnvelope({ event, meta }))
     }
     return replayable.length + this.replayCanonicalHooks()
   }
@@ -277,21 +282,6 @@ export class RelayAgentHookServer extends RelayAgentHookCanonicalStatus {
 
   // ─── Private ──────────────────────────────────────────────────────
 
-  private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    await handleRelayHookRequest(req, res, {
-      token: this.token,
-      env: this.env,
-      state: this.state,
-      providerNormalization: this.providerNormalization,
-      isPaneSurfaceRetired: this.isPaneSurfaceRetired,
-      getAgentLaunchToken: this.getAgentLaunchToken,
-      applyEvent: (event, source, env, version) => this.applyEvent(event, source, env, version),
-      ingestTmuxHook: (source, body) => this.ingestCanonicalTmuxHook(source, body, this.env),
-      retryScheduler: this.retryScheduler,
-      transportInterference: this.transportInterference
-    })
-  }
-
   private applyEvent(
     incoming: AgentHookEventPayload,
     source: AgentHookSource,
@@ -319,9 +309,11 @@ export class RelayAgentHookServer extends RelayAgentHookCanonicalStatus {
     )
   }
 
-  private ingestSpoolRecord(record: SpoolRecord): void {
-    ingestRelayHookSpoolRecord(record, this.state, this.env, {
+  private ingestSpoolRecord(record: SpoolRecord, isCurrent: () => boolean): Promise<void> | void {
+    return ingestRelayHookSpoolRecord(record, this.state, this.env, {
       providerNormalization: this.providerNormalization,
+      checkAgentPresence: (paneKey) => this.checkAgentPresence(paneKey),
+      isCurrent,
       apply: (...args) => this.applyEvent(...args, { isReplay: true }),
       isPaneSurfaceRetired: this.isPaneSurfaceRetired,
       getAgentLaunchToken: this.getAgentLaunchToken

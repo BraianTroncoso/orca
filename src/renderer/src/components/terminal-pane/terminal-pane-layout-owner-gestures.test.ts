@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import { layoutOwnerPaneGestures } from './terminal-pane-layout-owner-gestures'
-import type { sendPaneCommandToLayoutOwner } from './terminal-pane-layout-owner-commands'
+import type { sendLayoutCommandToOwner } from '@/runtime/layout-owner-command'
 
 const mocks = vi.hoisted(() => ({
   root: {
@@ -11,11 +11,11 @@ const mocks = vi.hoisted(() => ({
     first: { type: 'leaf', leafId: 'leaf-1' },
     second: { type: 'leaf', leafId: 'leaf-2' }
   },
-  send: vi.fn<typeof sendPaneCommandToLayoutOwner>()
+  send: vi.fn<typeof sendLayoutCommandToOwner>()
 }))
 
-vi.mock('./terminal-pane-layout-owner-commands', () => ({
-  sendPaneCommandToLayoutOwner: mocks.send
+vi.mock('@/runtime/layout-owner-command', () => ({
+  sendLayoutCommandToOwner: mocks.send
 }))
 vi.mock('@/store', () => ({
   useAppStore: { getState: () => ({ terminalLayoutsByTabId: { 'tab-1': { root: mocks.root } } }) }

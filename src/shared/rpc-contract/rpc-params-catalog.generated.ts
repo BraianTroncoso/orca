@@ -19,6 +19,10 @@ import {
 } from '../browser-client-host-protocol'
 import { BrowserClientPageMetadataParams } from '../browser-client-page-metadata-protocol'
 import { DelegatedMobileDeviceSyncParamsSchema } from '../delegated-mobile-device-contract'
+import {
+  DesktopBrowserBridgeAttachParams,
+  DesktopBrowserBridgeResultParams
+} from '../desktop-browser-bridge-protocol'
 import { RegisterDeviceKeyParamsSchema } from '../device-key-registration-contract'
 import { HostAccountLaunchEnvParams } from '../host-account-launch-env'
 import {
@@ -569,6 +573,7 @@ import {
   TerminalRename,
   TerminalResolveActive,
   TerminalResolvePane,
+  TerminalReveal,
   TerminalSend,
   TerminalSetViewerColors,
   TerminalSplit,
@@ -829,6 +834,8 @@ export const RPC_PARAMS_BY_METHOD = {
   'computer.scroll': ScrollOfComputerSchemasParams,
   'computer.setValue': SetValue,
   'computer.typeText': TypeText,
+  'desktopBrowserBridge.attach': DesktopBrowserBridgeAttachParams,
+  'desktopBrowserBridge.result': DesktopBrowserBridgeResultParams,
   'diagnostics.memory': null,
   'emulator.attach': AttachParamsOfEmulatorParams,
   'emulator.availability': EmulatorAvailabilityParams,
@@ -1001,6 +1008,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'hostedReview.createStacked': HostedReviewCreate,
   'hostedReview.forBranch': HostedReviewForBranch,
   'hostedReview.getCreationEligibility': HostedReviewCreationEligibility,
+  'integrationCredentials.moveKeyToFile': null,
   'jira.addIssueComment': IssueCommentOfJiraParams,
   'jira.attachmentImage': AttachmentImage,
   'jira.cancelGenerateIssueSummary': CancelGenerateIssueSummary,
@@ -1288,6 +1296,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'terminal.resolveIdentity': TerminalHandle,
   'terminal.resolvePane': TerminalResolvePane,
   'terminal.restoreFit': TerminalHandle,
+  'terminal.reveal': TerminalReveal,
   'terminal.send': TerminalSend,
   'terminal.setAutoRestoreFit': TerminalSetAutoRestoreFit,
   'terminal.setDisplayMode': TerminalSetDisplayMode,

@@ -71,19 +71,22 @@ type TestItem = Worktree & { status: NonNullable<Worktree['status']> }
 const stableRepoIcon = { type: 'emoji', emoji: 'o' } as const
 let updateSibling: Dispatch<SetStateAction<number>> = () => undefined
 
-const ALL_DETAILS = getWorktreeCardDetails(DEFAULT_WORKTREE_CARD_PROPERTIES, {
-  compactWorktreeCards: false,
-  newCardStyle: false
-})
+const detailsFor = (compactWorktreeCards: boolean, newCardStyle: boolean) =>
+  getWorktreeCardDetails(DEFAULT_WORKTREE_CARD_PROPERTIES, { compactWorktreeCards, newCardStyle })
+const ALL_DETAILS = detailsFor(false, false)
+const COMPACT = detailsFor(true, false)
+const NEW_CARD_STYLE = detailsFor(false, true)
 
 function ListRowHarness({
   item,
   now,
-  cardDetails = ALL_DETAILS
+  cardDetails = ALL_DETAILS,
+  hideRepo = false
 }: {
   item: TestItem
   now: number
   cardDetails?: WorktreeCardDetails
+  hideRepo?: boolean
 }) {
   const [sibling, setSibling] = useState(0)
   updateSibling = setSibling
@@ -103,7 +106,7 @@ function ListRowHarness({
       now,
       repoColor: '#000000',
       repoIcon: stableRepoIcon,
-      hideRepo: false,
+      hideRepo,
       cardDetails,
       agentActivityDisplayMode: 'compact',
       status: item.status,
@@ -405,6 +408,122 @@ describe('memoized worktree rows', () => {
       )
     )
     expect(shown()).toEqual({ pr: 0, host: 0 })
+  })
+
+  describe('Compact', () => {
+    const texts = (): string[] =>
+      renderer!.root
+        .findAllByType('Text' as never)
+        .flatMap((node) => node.props.children)
+        .filter((child): child is string => typeof child === 'string')
+    const repoChips = () =>
+      renderer!.root.findAll((node) => node.props.accessibilityLabel === 'Project orca')
+    const render = async (
+      props: Partial<{
+        item: TestItem
+        cardDetails: WorktreeCardDetails
+        hideRepo: boolean
+      }> = {}
+    ) => {
+      const element = createElement(ListRowHarness, { item: baseItem, now: 2_000, ...props })
+      await act(async () => {
+        if (renderer) {
+          renderer.update(element)
+        } else {
+          renderer = create(element)
+        }
+      })
+    }
+
+    it('moves the repo into a title chip and drops the branch line, as the desktop does', async () => {
+      await render()
+      expect(texts()).toEqual(expect.arrayContaining(['orca', 'feature/mobile-list']))
+      expect(repoChips()).toHaveLength(0)
+
+      await render({ cardDetails: COMPACT })
+      expect(texts()).not.toContain('orca')
+      expect(texts()).not.toContain('feature/mobile-list')
+      expect(texts()).toContain('mobile-list')
+      expect(repoChips()).toHaveLength(1)
+    })
+
+    it('drops the host and child badges with the meta row, keeping a remote host glyph', async () => {
+      const item: TestItem = {
+        ...baseItem,
+        hostId: 'ssh:ssh-1',
+        hostContextLabel: 'openclaw',
+        lineageDepth: 1
+      }
+      await render({ item })
+      expect(texts()).toEqual(expect.arrayContaining(['openclaw', 'Child']))
+
+      await render({ item, cardDetails: COMPACT })
+      expect(texts()).not.toContain('openclaw')
+      expect(texts()).not.toContain('Child')
+      const glyphs = () => renderer!.root.findAll((node) => String(node.type) === 'Server')
+      expect(glyphs()).toHaveLength(1)
+      expect(
+        renderer!.root.findAll((node) => node.props.accessibilityLabel === 'openclaw')
+      ).toHaveLength(1)
+
+      // A remote row with no host label still gets the glyph, named generically.
+      await render({ item: { ...item, hostContextLabel: undefined }, cardDetails: COMPACT })
+      expect(glyphs()).toHaveLength(1)
+      expect(
+        renderer!.root.findAll((node) => node.props.accessibilityLabel === 'Remote host')
+      ).toHaveLength(1)
+
+      // An older host's row carries only the resolved host the label pass stamped.
+      await render({
+        item: { ...item, hostId: undefined, hostContextHostId: 'ssh:ssh-1' },
+        cardDetails: COMPACT
+      })
+      expect(glyphs()).toHaveLength(1)
+
+      // The new card style keeps the host badge in its meta row: one server icon, the badge's.
+      await render({ item, cardDetails: NEW_CARD_STYLE })
+      expect(glyphs()).toHaveLength(1)
+      expect(texts()).toContain('openclaw')
+
+      // Local rows get no glyph, as the desktop shows none for local projects.
+      await render({ item: { ...item, hostId: 'local' }, cardDetails: COMPACT })
+      expect(glyphs()).toHaveLength(0)
+      expect(renderer!.root.findAll((node) => String(node.type) === 'Monitor')).toHaveLength(0)
+    })
+
+    it('leaves the chip out when the list is grouped by repo or the row is a folder', async () => {
+      await render({ cardDetails: COMPACT, hideRepo: true })
+      expect(repoChips()).toHaveLength(0)
+
+      await render({
+        cardDetails: COMPACT,
+        item: { ...baseItem, workspaceKind: 'folder-workspace' }
+      })
+      expect(repoChips()).toHaveLength(0)
+      expect(texts()).toContain('Folder')
+    })
+
+    it('keeps the PR badge next to the repo chip', async () => {
+      await render({
+        cardDetails: COMPACT,
+        item: { ...baseItem, linkedPR: { number: 7, state: 'open' } }
+      })
+      expect(repoChips()).toHaveLength(1)
+      expect(renderer!.root.findAll((node) => String(node.type) === 'GitPullRequest')).toHaveLength(
+        1
+      )
+      const badgeTexts = renderer!.root
+        .findAllByType('Text' as never)
+        .map((node) => [node.props.children].flat().join(''))
+      expect(badgeTexts).toContain('#7')
+    })
+
+    it('uses the chip under the new card style but keeps the branch line', async () => {
+      await render({ cardDetails: NEW_CARD_STYLE })
+      expect(repoChips()).toHaveLength(1)
+      expect(texts()).not.toContain('orca')
+      expect(texts()).toContain('feature/mobile-list')
+    })
   })
 
   it('passes the Jira, automation and CLI facts the card properties show', async () => {

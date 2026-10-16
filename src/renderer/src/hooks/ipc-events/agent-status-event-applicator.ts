@@ -17,6 +17,7 @@ import {
   applyResolvedAgentTerminalTitleToTab,
   hasRuntimeBackedWorktreeAttribution,
   isAgentStatusForRecentlyClosedTab,
+  isSeenHostReplay,
   resolveHookPayloadAgentType,
   shouldApplyResolvedAgentTerminalTitleToTab
 } from './agent-status-routing'
@@ -247,8 +248,11 @@ export function createAgentStatusEventApplicator(args: {
       },
       metadata: normalizeAgentStatusMetadata(data, authorityRestartId)
     }
+    // Why: replays are cached state, so they seed completion tracking unless they carry an unseen done.
+    const replayed =
+      options?.replay === true || isSeenHostReplay(data, resolvedPayload.state, existingStatus)
     const applyPostCommitNotification = (): void => {
-      if (statusWorktreeId && (options?.replay !== true || resolvedPayload.state === 'working')) {
+      if (statusWorktreeId && (!replayed || resolvedPayload.state === 'working')) {
         const notificationPayload =
           typeof data.stateStartedAt === 'number'
             ? { ...resolvedPayload, stateStartedAt: data.stateStartedAt }
@@ -257,7 +261,7 @@ export function createAgentStatusEventApplicator(args: {
           paneKey,
           worktreeId: statusWorktreeId,
           payload: notificationPayload,
-          ...(options?.replay === true ? { seedOnly: true } : {})
+          ...(replayed ? { seedOnly: true } : {})
         })
       }
     }

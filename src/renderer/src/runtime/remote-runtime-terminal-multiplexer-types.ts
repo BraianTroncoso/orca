@@ -157,13 +157,13 @@ export type RemoteRuntimeMultiplexedTerminal = {
   setOutputPaused: (paused: boolean) => boolean
   // Why: only then does a pause with no drop notice prove nothing was lost.
   reportsPausedOutputDrops?: () => boolean
-  serializeBuffer: (opts?: {
-    scrollbackRows?: number
-  }) => Promise<RemoteRuntimeSnapshotImage | null>
+  serializeBuffer: (
+    opts?: RemoteRuntimeSnapshotRequestOptions
+  ) => Promise<RemoteRuntimeSnapshotImage | null>
   // Why: same request as serializeBuffer, but keeps the host's reason for an absent buffer instead of collapsing it to null.
-  serializeBufferOutcome: (opts?: {
-    scrollbackRows?: number
-  }) => Promise<RemoteRuntimeSnapshotOutcome>
+  serializeBufferOutcome: (
+    opts?: RemoteRuntimeSnapshotRequestOptions
+  ) => Promise<RemoteRuntimeSnapshotOutcome>
   close: () => void
 }
 
@@ -230,8 +230,15 @@ export type RemoteRuntimeSnapshotInfo = {
   pendingEscapeTailAnsi?: string
 }
 
+export type RemoteRuntimeSnapshotRequestOptions = {
+  scrollbackRows?: number
+  /** Client-only: the pane repaints from this image, so live output resumes after its seq. */
+  repaintsPane?: boolean
+}
+
 export type RemoteRuntimeSnapshotRequest = {
   requestId: number
+  repaintsPane?: boolean
   resolve: (outcome: RemoteRuntimeSnapshotOutcome) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>

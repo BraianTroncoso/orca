@@ -20,7 +20,7 @@ import { capturePendingTerminalPaneClose } from './terminal-pane-close-admission
 import { commitTerminalSurfaceClose } from '@/store/terminals/terminal-surface-close-intent'
 import { noteAgentLaunchPaneClosedByUser } from '@/lib/agent-launch-pane-closes'
 import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../shared/layout-owner-switch'
-import { sendPaneCommandToLayoutOwner } from './terminal-pane-layout-owner-commands'
+import { sendLayoutCommandToOwner } from '@/runtime/layout-owner-command'
 import { closeAfterLastPaneRefusal } from './layout-owner-last-pane-refusal'
 
 export function useTerminalPaneCloseActions(controller: TerminalPaneBindingController) {
@@ -119,7 +119,7 @@ export function useTerminalPaneCloseActions(controller: TerminalPaneBindingContr
       if (
         ORCA_LAYOUT_OWNER_IS_MAIN &&
         leafId &&
-        sendPaneCommandToLayoutOwner(
+        sendLayoutCommandToOwner(
           worktreeId,
           { type: 'closePane', tabId, leafId },
           {

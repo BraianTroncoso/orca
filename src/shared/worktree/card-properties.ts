@@ -119,10 +119,18 @@ function matchesWorktreeCardProperties(
   return expected.every((property, index) => properties[index] === property)
 }
 
-/** What the shared Card layout and properties show on a workspace card; each surface draws its own. */
+/**
+ * What the shared Card layout and properties show on a workspace card; each surface draws its own.
+ * The desktop card keeps further dense-layout rules of its own (title-row indicators, icon-only SSH).
+ */
 export type WorktreeCardDetails = {
   /** The Compact layout as it applies: the new card style overrides it. */
   compactCards: boolean
+  /** Repo identity is an icon chip in the title row, not a name in the meta row (compact cards and
+   *  the new card style). Read by the phone row and the desktop card's repo badge. */
+  repoInTitle: boolean
+  /** The identity meta row (repo, host, branch or folder path, detached HEAD); compact cards drop it. */
+  metaRow: boolean
   issue: boolean
   linearIssue: boolean
   jiraIssue: boolean
@@ -131,7 +139,7 @@ export type WorktreeCardDetails = {
   cli: boolean
   comment: boolean
   ports: boolean
-  /** The host badge; compact cards leave it out. */
+  /** The host badge, which sits in the meta row. */
   host: boolean
   /** The agent rows under a card; compact cards leave them out. */
   inlineAgents: boolean
@@ -143,9 +151,12 @@ export function getWorktreeCardDetails(
   settings: { compactWorktreeCards: boolean; newCardStyle: boolean }
 ): WorktreeCardDetails {
   const compactCards = !settings.newCardStyle && settings.compactWorktreeCards
+  const metaRow = !compactCards
   const shows = (property: WorktreeCardProperty) => cardProps.includes(property)
   return {
     compactCards,
+    repoInTitle: settings.newCardStyle || compactCards,
+    metaRow,
     issue: shows('issue'),
     linearIssue: shows('linear-issue'),
     jiraIssue: shows('jira-issue'),
@@ -154,7 +165,7 @@ export function getWorktreeCardDetails(
     cli: shows('cli'),
     comment: shows('comment'),
     ports: shows('ports'),
-    host: !compactCards && shows('host'),
+    host: metaRow && shows('host'),
     inlineAgents: !compactCards && shows('inline-agents')
   }
 }

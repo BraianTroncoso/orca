@@ -63,7 +63,16 @@ describe('remote terminal paused-output drop notice', () => {
             send(TerminalStreamOpcode.SnapshotStart, encodeTerminalStreamJson({ seq: cursor }))
             send(TerminalStreamOpcode.SnapshotEnd, new Uint8Array())
           } else if (frame?.opcode === TerminalStreamOpcode.SnapshotRequest) {
-            snapshotRequests.push(decodeTerminalStreamJson(frame.payload) ?? {})
+            const request = decodeTerminalStreamJson<{ requestId?: number }>(frame.payload) ?? {}
+            snapshotRequests.push(request)
+            // Answer only a pane's tagged request; resyncs stay unanswered so tests count them.
+            if (typeof request.requestId === 'number') {
+              send(
+                TerminalStreamOpcode.SnapshotStart,
+                encodeTerminalStreamJson({ requestId: request.requestId, seq: cursor })
+              )
+              send(TerminalStreamOpcode.SnapshotEnd, new Uint8Array())
+            }
           }
         }
       }
@@ -120,6 +129,67 @@ describe('remote terminal paused-output drop notice', () => {
     output('after-real-gap')
     expect(snapshotRequests).toHaveLength(1)
     expect(snapshotRequests[0]?.requestId).toBeUndefined()
+  })
+
+  // Why: with both the drop notice and the pane's repaint-baseline advance, a reveal
+  // costs one tagged snapshot and the stream never falls back to a resync.
+  it('composes with the reveal snapshot: one tagged request, no resync', async () => {
+    for (const announce of [true, false]) {
+      hostCapabilities = announce
+        ? { outputPause: 1, outputPauseDropNotice: 1 }
+        : { outputPause: 1 }
+      snapshotRequests = []
+      const { data, stream } = await subscribeClient()
+      output('before')
+      stream.setOutputPaused(true)
+      cursor += 'dropped-while-hidden'.length
+      if (announce) {
+        send(TerminalStreamOpcode.PausedOutputDropped, new Uint8Array())
+      }
+      stream.setOutputPaused(false)
+      await stream.serializeBufferOutcome({ repaintsPane: true })
+      output('live')
+
+      expect(snapshotRequests).toEqual([{ requestId: expect.any(Number) }])
+      expect(data).toEqual(['before', 'live'])
+      stream.close()
+      resetRemoteRuntimeTerminalMultiplexersForTests()
+    }
+  })
+
+  // Why: the reveal snapshot covers the announced gap, so a later real loss must still resync.
+  it('detects a real gap after the reveal snapshot covered the announced one', async () => {
+    hostCapabilities = { outputPause: 1, outputPauseDropNotice: 1 }
+    const { data, stream } = await subscribeClient()
+    output('before')
+    stream.setOutputPaused(true)
+    cursor += 'dropped-while-hidden'.length
+    send(TerminalStreamOpcode.PausedOutputDropped, new Uint8Array())
+    stream.setOutputPaused(false)
+    await stream.serializeBufferOutcome({ repaintsPane: true })
+    cursor += 'lost-after-reveal'.length
+    output('after-real-gap')
+
+    expect(data).toEqual(['before'])
+    expect(snapshotRequests).toHaveLength(2)
+    expect(snapshotRequests[1]?.requestId).toBeUndefined()
+  })
+
+  it('detects a real gap after a recovery snapshot covered the announced one', async () => {
+    hostCapabilities = { outputPause: 1, outputPauseDropNotice: 1 }
+    const { data, stream } = await subscribeClient()
+    output('before')
+    stream.setOutputPaused(true)
+    cursor += 'dropped-while-hidden'.length
+    send(TerminalStreamOpcode.PausedOutputDropped, new Uint8Array())
+    stream.setOutputPaused(false)
+    send(TerminalStreamOpcode.SnapshotStart, encodeTerminalStreamJson({ seq: cursor }))
+    send(TerminalStreamOpcode.SnapshotEnd, new Uint8Array())
+    cursor += 'lost-after-recovery'.length
+    output('after-real-gap')
+
+    expect(data).toEqual(['before'])
+    expect(snapshotRequests).toHaveLength(1)
   })
 
   it('keeps the resync for an older host that does not negotiate drop notices', async () => {

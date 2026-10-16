@@ -9,19 +9,25 @@ const mocks = vi.hoisted(() => ({
     loading: vi.fn(() => 'progress'),
     dismiss: vi.fn()
   }),
-  fetchReposForAllHosts: vi.fn(async () => undefined)
+  fetchReposForAllHosts: vi.fn(async () => undefined),
+  remountTerminalTabForRecovery: vi.fn()
 }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
 vi.mock('../../store', () => ({
   useAppStore: {
     getState: () => ({
       fetchReposForAllHosts: mocks.fetchReposForAllHosts,
+      remountTerminalTabForRecovery: mocks.remountTerminalTabForRecovery,
       sshTargetLabels: new Map([['ssh-1', 'Box']]),
       tabsByWorktree: {},
       ptyIdsByTabId: {},
       terminalLayoutsByTabId: {}
     })
   }
+}))
+
+vi.mock('../../components/terminal-pane/legacy-relay-bridge-panes', () => ({
+  legacyRelayBridgedTabIds: (targetId: string) => (targetId === 'ssh-1' ? ['tab-1', 'tab-2'] : [])
 }))
 
 const { applySshManagedServerTransition } = await import('./ssh-managed-server-state-effects')
@@ -41,6 +47,32 @@ beforeEach(() => {
 })
 afterEach(() => {
   Reflect.deleteProperty(window, 'api')
+})
+
+describe('a host kept connected for the relay bridge', () => {
+  const bridged: Status = {
+    kind: 'relay',
+    reason: 'relay_terminals_live',
+    terminals: 1,
+    bridged: true
+  }
+
+  it('remounts the relay-era tabs the bridge serves once, so they reattach (STA-10604)', () => {
+    applySshManagedServerTransition('ssh-1', { kind: 'setting-up', phase: 'converting' }, bridged)
+    expect(mocks.remountTerminalTabForRecovery.mock.calls).toEqual([['tab-1'], ['tab-2']])
+    mocks.remountTerminalTabForRecovery.mockClear()
+    applySshManagedServerTransition('ssh-1', bridged, bridged)
+    applySshManagedServerTransition('ssh-1', undefined, offer)
+    expect(mocks.remountTerminalTabForRecovery).not.toHaveBeenCalled()
+    expect(mocks.toast.error).not.toHaveBeenCalled()
+  })
+
+  it('still remounts when the connect reply stored the bridged status before its push', () => {
+    applySshManagedServerTransition('ssh-1', undefined, offer)
+    mocks.remountTerminalTabForRecovery.mockClear()
+    applySshManagedServerTransition('ssh-1', bridged, bridged)
+    expect(mocks.remountTerminalTabForRecovery.mock.calls).toEqual([['tab-1'], ['tab-2']])
+  })
 })
 
 describe('a host the managed server does not serve', () => {

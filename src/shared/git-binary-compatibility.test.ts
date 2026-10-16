@@ -9,7 +9,7 @@ import {
   writeFile
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   isUnsupportedMergeTreeMergeBaseError,
@@ -35,12 +35,11 @@ import {
   gitlabMergeRequestHeadLocalRef,
   reviewHeadRemoteRefComponent
 } from './review-head-tracking-ref'
-import { parseWorktreeList } from './git-worktree-porcelain-parser'
-import { fastForwardLocalBaseBranch } from './worktree/local-base-branch-fast-forward'
 import { gitChangeListArgs, parseGitChangeList } from './git-change-list'
 import { encodeGitPathspecs } from './git-pathspec-stdin'
 import { GitBinaryTestFixture } from './git-binary.test-fixture'
 import { registerGitRepositoryRegistrationBinaryCompatibilityCase } from './git-repository-registration-binary-compatibility.test-cases'
+import { registerGitLocalBaseBranchBinaryCompatibilityCase } from './git-local-base-branch-binary-compatibility.test-cases'
 import { registerGitResolutionBinaryCompatibilityCases } from './git-resolution-binary-compatibility.test-cases'
 import { registerGitWorktreeBinaryCompatibilityCases } from './git-worktree-binary-compatibility.test-cases'
 
@@ -665,68 +664,7 @@ describeBinaryCompatibility('real Git binary compatibility', () => {
     expect(included).toEqual(['vendored/inner.txt'])
   })
 
-  // Why pin this: the owner-checkout fast-forward overrides the user's merge settings with flags
-  // and `-c` keys; every one must parse on the baseline, and a branch-level `-s ours` must not win.
-  it('fast-forwards a checked-out base branch with the exact owner arguments', async () => {
-    const worktree = 'compat-ff-wt'
-    const branch = 'compat-ff-main'
-    const marker = join(repoPath, worktree, 'compat-ff-hook-ran')
-    const hookPath = join(repoPath, '.git', 'hooks', 'post-merge')
-    await runGit(['worktree', 'add', '-q', '-b', branch, worktree])
-    const localOid = (await runGit(['-C', worktree, 'rev-parse', 'HEAD'])).stdout.trim()
-    await writeFile(join(repoPath, worktree, 'compat-ff-added.txt'), 'upstream\n')
-    await runGit(['-C', worktree, 'add', 'compat-ff-added.txt'])
-    await runGit(['-C', worktree, 'commit', '-qm', 'upstream'])
-    const remoteOid = (await runGit(['-C', worktree, 'rev-parse', 'HEAD'])).stdout.trim()
-    await runGit(['update-ref', `refs/remotes/origin/${branch}`, remoteOid])
-    await runGit(['-C', worktree, 'reset', '-q', '--hard', localOid])
-    await runGit(['config', `branch.${branch}.mergeOptions`, '-s ours'])
-    // Why: an uninstalled source-built Git (the CI baseline) has no templates, so no hooks dir.
-    await mkdir(dirname(hookPath), { recursive: true })
-    await writeFile(hookPath, '#!/bin/sh\necho ran > compat-ff-hook-ran\n', { mode: 0o755 })
-    const merges: string[][] = []
-    // Why `-C`: in the Docker lane, paths Git reports are container paths, not host ones.
-    const git = {
-      exec: (args: string[], cwd: string) => {
-        if (args.includes('merge')) {
-          merges.push(args)
-        }
-        return runGit(['-C', cwd, ...args])
-      },
-      listWorktrees: async (path: string) =>
-        parseWorktreeList((await runGit(['-C', path, 'worktree', 'list', '--porcelain'])).stdout)
-    }
-
-    try {
-      const outcome = await fastForwardLocalBaseBranch(git, {
-        repoPath: image ? '/repo' : repoPath,
-        fullRef: `refs/heads/${branch}`,
-        remoteTrackingRef: `refs/remotes/origin/${branch}`
-      })
-
-      expect(outcome).toMatchObject({ status: 'updated' })
-      expect(merges).toHaveLength(1)
-      await expect(
-        runGit(['rev-list', '--parents', '-1', `refs/heads/${branch}`])
-      ).resolves.toMatchObject({ stdout: `${remoteOid} ${localOid}\n` })
-      await expect(
-        readFile(join(repoPath, worktree, 'compat-ff-added.txt'), 'utf-8')
-      ).resolves.toBe('upstream\n')
-      await expect(readFile(marker, 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' })
-
-      // Control: the hook and the branch setting are both live for a plain fast-forward.
-      await runGit(['-C', worktree, 'reset', '-q', '--hard', localOid])
-      await runGit(['-C', worktree, 'merge', '--ff-only', '-q', remoteOid])
-      await expect(readFile(marker, 'utf-8')).resolves.toBe('ran\n')
-      await expect(runGit(['rev-parse', `refs/heads/${branch}`])).resolves.not.toMatchObject({
-        stdout: `${remoteOid}\n`
-      })
-    } finally {
-      await rm(hookPath, { force: true })
-      await runGit(['config', '--unset', `branch.${branch}.mergeOptions`])
-      await runGit(['worktree', 'remove', '--force', worktree])
-    }
-  })
+  registerGitLocalBaseBranchBinaryCompatibilityCase(runGit, () => repoPath, Boolean(image))
   registerGitResolutionBinaryCompatibilityCases(runGit, (name) =>
     image ? `/repo/${name}.git` : join(repoPath, `${name}.git`)
   )

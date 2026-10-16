@@ -39,6 +39,7 @@ import {
 } from './serve-electron-preflight'
 import { MacServeStartupAbortError } from './serve-signal-exit-diagnostic'
 import { superviseServeService } from './serve-supervised-service'
+import { reexecThisServeUnderInitReaper } from './serve-pid1-init-reaper'
 import { supervisedAppImageUpdate } from './serve-appimage-update'
 import {
   relocateThisServeSupervisor,
@@ -131,6 +132,8 @@ function spawnDetached(command: string, args: string[], options: SpawnOptions): 
 }
 
 export function serveOrcaApp(args: ServeOrcaAppArgs = {}): Promise<number> {
+  // Why first: as a container or PrivatePIDs init, nothing would reap orphaned descendants.
+  reexecThisServeUnderInitReaper()
   const executable = resolveForegroundOrcaExecutable()
   // Why one value: the selector, orcad and Electron must all serve the profile the caller chose.
   const userDataPath = resolveLaunchUserDataPath()

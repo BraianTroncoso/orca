@@ -10,6 +10,7 @@ import { translate } from '@/i18n/i18n'
 import { useAppStore } from '../../store'
 import { withoutConvertedSshHostRows } from '../../store/repos/converted-ssh-host-rows'
 import { preserveConvertedSshBrowserPages } from '../../store/repos/converted-ssh-browser-pages'
+import { legacyRelayBridgedTabIds } from '../../components/terminal-pane/legacy-relay-bridge-panes'
 
 type ManagedServerStatus = SshConnectionState['managedServer']
 
@@ -32,6 +33,7 @@ export function applySshManagedServerTransition(
   if (next?.kind === 'relay') {
     catalogLoadByTarget.delete(targetId)
   }
+  remountBridgedTabsOnce(targetId, next)
   if (
     next?.kind === 'relay' &&
     next.reason === 'refused' &&
@@ -48,6 +50,25 @@ export function applySshManagedServerTransition(
         'This SSH host could not move to a managed Orca server. SSH Hosts in Settings shows why.'
       )
     )
+  }
+}
+
+// Why not `previous`: a connect reply can write the bridged status into the store before its push.
+const bridgedTargetsRemounted = new Set<string>()
+
+/** COMPAT(legacy-relay-bridge): panes that mounted inert before the connect now reattach. */
+function remountBridgedTabsOnce(targetId: string, next: ManagedServerStatus): void {
+  if (!(next?.kind === 'relay' && next.bridged)) {
+    bridgedTargetsRemounted.delete(targetId)
+    return
+  }
+  if (bridgedTargetsRemounted.has(targetId)) {
+    return
+  }
+  bridgedTargetsRemounted.add(targetId)
+  const store = useAppStore.getState()
+  for (const tabId of legacyRelayBridgedTabIds(targetId)) {
+    store.remountTerminalTabForRecovery(tabId)
   }
 }
 

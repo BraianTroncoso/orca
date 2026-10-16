@@ -41,6 +41,7 @@ export type Worktree = {
   /** Workspace options facts the host stamps (RuntimeWorktreePsSummary); older hosts send none. */
   defaultBranch?: boolean
   automationCreated?: true
+  automationName?: string
   cliCreated?: true
   detachedHead?: true
   worktreeInstanceId?: string
@@ -58,7 +59,7 @@ export type Worktree = {
   lastOutputAt?: number
   isPinned: boolean
   isActive?: boolean
-  linkedPR: { number: number; state: string } | null
+  linkedPR: RuntimeWorktreePsSummary['linkedPR']
   linkedIssue?: number | null
   linkedLinearIssue?: string | null
   linkedGitLabMR?: number | null

@@ -1,6 +1,6 @@
 import type { PaneManager, PaneManagerOptions } from '@/lib/pane-manager/pane-manager'
 import { useAppStore } from '@/store'
-import { sendPaneCommandToLayoutOwner } from './terminal-pane-layout-owner-commands'
+import { sendLayoutCommandToOwner } from '@/runtime/layout-owner-command'
 
 /**
  * A layout-owner build's pane gestures: an in-tab drop moves the pane once main has answered, as
@@ -29,7 +29,7 @@ export function layoutOwnerPaneGestures(pane: {
     const root = useAppStore.getState().terminalLayoutsByTabId[tabId]?.root
     if (root && pane.shouldPersistLayout()) {
       const keep = (): void => {}
-      sendPaneCommandToLayoutOwner(
+      sendLayoutCommandToOwner(
         worktreeId,
         { type: 'setPaneRatios', tabId, root },
         { apply: keep, asToday: keep }
@@ -54,7 +54,7 @@ export function layoutOwnerPaneGestures(pane: {
           }
         }
       }
-      const taken = sendPaneCommandToLayoutOwner(
+      const taken = sendLayoutCommandToOwner(
         worktreeId,
         { type: 'movePane', tabId, leafId, targetLeafId, side: zone },
         { apply: settle, asToday: settle, refused: settle }

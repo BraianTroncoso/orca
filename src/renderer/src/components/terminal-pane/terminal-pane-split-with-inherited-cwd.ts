@@ -5,7 +5,7 @@ import type { PtyTransport } from './pty-transport-types'
 import { resolveSplitCwd, type PaneCwdMap } from './resolve-split-cwd'
 import { recordCreatedTerminalPaneSplit } from './terminal-pane-split-completion'
 import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../shared/layout-owner-switch'
-import { sendPaneCommandToLayoutOwner } from './terminal-pane-layout-owner-commands'
+import { sendLayoutCommandToOwner } from '@/runtime/layout-owner-command'
 
 type SplitArgs = {
   worktreeId: string
@@ -34,7 +34,7 @@ export function splitTerminalPaneWithInheritedCwd(args: SplitArgs): void {
   // Switch point: main writes the split and mints the new pane's id; the window then mounts it.
   if (
     ORCA_LAYOUT_OWNER_IS_MAIN &&
-    sendPaneCommandToLayoutOwner(
+    sendLayoutCommandToOwner(
       args.worktreeId,
       { type: 'splitPane', tabId: args.tabId, leafId: args.pane.leafId, direction: args.direction },
       {
@@ -54,7 +54,7 @@ function mountMainSplit(args: SplitArgs, ptyId: string | null, leafId: string): 
   const manager = args.getManager ? args.getManager() : args.manager
   if (manager?.getNumericIdForLeaf(leafId) == null) {
     const keep = (): void => {}
-    sendPaneCommandToLayoutOwner(
+    sendLayoutCommandToOwner(
       args.worktreeId,
       { type: 'closePane', tabId: args.tabId, leafId },
       { apply: keep, asToday: keep }

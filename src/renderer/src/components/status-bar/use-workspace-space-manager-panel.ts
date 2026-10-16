@@ -33,9 +33,13 @@ export function useWorkspaceSpaceManagerPanel() {
     sortKey
   } = bindings
   const refresh = useCallback((): void => {
-    void refreshWorkspaceSpace().catch(() => {
-      /* scanError is stored by the slice */
-    })
+    void refreshWorkspaceSpace()
+      .then((analysis) => {
+        void window.api.workspaceSpace.publishWindowAnalysis?.(analysis)
+      })
+      .catch(() => {
+        /* scanError is stored by the slice */
+      })
   }, [refreshWorkspaceSpace])
 
   const cancelScan = useCallback((): void => {
@@ -103,6 +107,7 @@ export function useWorkspaceSpaceManagerPanel() {
       for (const target of deletedTargets) {
         dismissDeleteWorktreeFailureToast(target.id)
       }
+      void window.api.workspaceSpace.requestWorktreeRefresh?.()
       const deletedIdentities = new Set(
         deletedTargets.map((target) =>
           composeWorktreeHostIdentity(target.executionHostId ?? undefined, target.id)

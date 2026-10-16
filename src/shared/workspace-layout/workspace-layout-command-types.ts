@@ -16,6 +16,16 @@ import type { LayoutEditorFile, LayoutTerminalCreation } from './workspace-layou
 
 type On = { workspace: string }
 
+/**
+ * The desktop's drag-out rules: the terminal the window's pane shows outranks a stale binding
+ * here, and a tab's last pane moves too (the window holds siblings this copy lacks).
+ */
+export type WindowPaneDetach = {
+  ptyId: string | null
+  /** The new tab's id, the same in every partition holding the pane; minted when absent. */
+  tabId?: string
+}
+
 export type LayoutCommand =
   | (On & {
       type: 'createTerminalTab'
@@ -58,6 +68,11 @@ export type LayoutCommand =
       refusePinned?: boolean
       /** Editor tabs whose view reported an unsaved draft (rule 10). */
       dirtyTabIds?: string[]
+      /**
+       * Records each terminal tab closed, or not listed, as closed for this reason, so a start
+       * that commits later is refused. Main sets it on a window's close.
+       */
+      recordClose?: 'user' | 'cleanup'
     })
   | (On & { type: 'moveTab'; tabId: string; toGroupId: string; index: number })
   | (On & { type: 'splitGroup'; tabId: string; besideGroupId: string; direction: GroupSide })
@@ -71,6 +86,8 @@ export type LayoutCommand =
       leafId: string
       groupId?: string
       index?: number
+      /** A window's drag-out, under the desktop's move rules (WindowPaneDetach). */
+      windowDetach?: WindowPaneDetach
     })
   | (On & { type: 'renameTab'; tabId: string } & TabTitle)
   | (On & { type: 'renamePane'; tabId: string; leafId: string; title: string | null })
@@ -84,6 +101,8 @@ export type LayoutCommand =
   | (On & { type: 'setChatPane'; tabId: string; leafId: string | null })
   | (On & {
       type: 'openEditorTab'
+      /** The window's id for a tab it drew first; minted when absent. */
+      tabId?: string
       /** The editor's file id: the tab's entity. */
       fileId: string
       contentType: Exclude<TabContentType, 'terminal' | 'browser' | 'agent-session' | 'simulator'>
@@ -100,9 +119,26 @@ export type LayoutCommand =
   | (On & {
       type: 'openBrowserTab'
       profileId?: string | null
+      sessionPartition?: string | null
       groupId?: string
+      /** Placement in the group: after this tab, else at this index, else at its end. */
+      afterTabId?: string
+      index?: number
       /** The id of a page that already runs; it names the tab too, as a host's page names its row. */
       pageId?: string
+      /** The window's own ids for a tab it drew: its tab-bar entry and its browser record. */
+      tabId?: string
+      browserTabId?: string
+    })
+  | (On & { type: 'openBrowserPage'; browserTabId: string; pageId: string })
+  | (On & { type: 'closeBrowserPage'; browserTabId: string; pageId: string })
+  /** A page the address bar converted: the new page takes the old one's place. */
+  | (On & { type: 'replaceBrowserPage'; browserTabId: string; pageId: string; newPageId: string })
+  | (On & {
+      type: 'setBrowserTabProfile'
+      browserTabId: string
+      profileId: string | null
+      sessionPartition: string | null
     })
   | (On & {
       type: 'openAgentSessionTab'
@@ -145,6 +181,11 @@ export type LayoutRefusalCode =
   | 'pane_sleeping'
   | 'pane_already_bound'
   | 'workspace_exists'
+  | 'tab_exists'
+  /** A window's drag-out: another tab holds the pane, or no copy binds the window's terminal. */
+  | 'pane_in_other_tab'
+  | 'pty_mismatch'
+  | 'page_exists'
 
 /** What the runtime does after applying: stop or start terminals. The reply never waits on them. */
 export type LayoutEffects = { stopPtyIds: string[]; startPaneKeys: string[] }
@@ -155,6 +196,8 @@ export type LayoutCommandResult = {
   paneKey?: string
   groupId?: string
   pageId?: string
+  /** A window's drag-out: the terminal the moved pane shows, null when unbound. */
+  ptyId?: string | null
   tabClosed?: boolean
   alreadyClosed?: boolean
   closed?: string[]

@@ -1,3 +1,5 @@
+import { hasOtherAgentProcessOwner } from '../shared/agent-process-presence'
+import { sameAgentStatusTerminalOwner } from '../shared/agent-status-terminal-owner'
 import { normalizeHookPayload } from '../shared/agent-hook-listener'
 import {
   clearPaneCacheState,
@@ -38,6 +40,15 @@ export class RelayProviderHookNormalization {
       cacheRelayLegacyAgentStatus(state, event, MAX_CACHED_PANES, (paneKey) =>
         clearPaneCacheState(providerState, paneKey)
       )
+      const owner = canonical.lastStatusByPaneKey.get(event.paneKey)
+      if (
+        owner &&
+        !owner.providerSessionOnly &&
+        sameAgentStatusTerminalOwner(owner, event) &&
+        hasOtherAgentProcessOwner(owner.agentPresence, source)
+      ) {
+        return event
+      }
       const prompt = state.lastPromptByPaneKey.get(event.paneKey)
       const tool = state.lastToolByPaneKey.get(event.paneKey)
       if (prompt !== undefined) {

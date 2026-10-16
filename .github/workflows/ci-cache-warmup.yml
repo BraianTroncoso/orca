@@ -48,6 +48,7 @@ on:
       - 'native/windows-registry/**'
       - 'native/windows-security/**'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - '.github/workflows/ci-cache-warmup.yml'
       - '.github/actions/prepare-headless-compiler/**'
@@ -63,6 +64,7 @@ concurrency:
 
 jobs:
   warm:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     concurrency:
       group: ci-cache-warmup-linux-x64-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: ${{ github.event_name != 'schedule' }}

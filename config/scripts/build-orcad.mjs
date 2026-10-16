@@ -34,6 +34,7 @@ import { materializeWatcherPackage } from './orcad-watcher-package.mjs'
 import { stageOrcadWindowsProcessTree } from './orcad-windows-process-tree.mjs'
 import { stageOrcadWindowsCliLauncher } from './orcad-windows-cli-launcher.mjs'
 import { stageOrcadWindowsSecurity } from './orcad-windows-security.mjs'
+import { stageOrcadLinearSdk } from './orcad-linear-sdk-package.mjs'
 import {
   ORCAD_EMOJI_SHORTCODE_DATASET,
   ORCAD_CLI_ENTRY_FILENAME,
@@ -175,6 +176,7 @@ copyFileSync(
   createRequire(import.meta.url).resolve('emojibase-data/en/shortcodes/emojibase.json'),
   emojiDatasetOutput
 )
+await stageOrcadLinearSdk(ROOT, OUT_DIR)
 // The desktop template omits it: ~10 MB per target, and orcad already treats it as optional.
 if (existsSync(AGENT_BROWSER_SOURCE) && process.env.ORCAD_OMIT_AGENT_BROWSER !== '1') {
   copyFileSync(AGENT_BROWSER_SOURCE, AGENT_BROWSER_OUTPUT)
