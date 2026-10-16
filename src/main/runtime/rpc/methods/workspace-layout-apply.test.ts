@@ -4,6 +4,7 @@ import { RUNTIME_CAPABILITIES } from '../../../../shared/protocol-version'
 import { MOBILE_RPC_METHOD_ALLOWLIST } from '../../runtime-rpc/runtime-rpc-mobile-method-allowlist'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import { eraseRpcMethods, isStreamingMethod, type RpcContext } from '../core'
+import { LAYOUT_APPLY_METHODS } from './workspace-layout'
 
 const WORKTREE = 'repo-1::/work/one'
 const SPLIT = {
@@ -90,7 +91,9 @@ describe('layout.apply', () => {
   })
 
   it('takes no close semantics or blank title from the window', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const pane = { workspace: WORKTREE, tabId: 'tab-1', leafId: 'leaf-1' }
 
     expect(
@@ -107,7 +110,9 @@ describe('layout.apply', () => {
   })
 
   it('accepts only a drop side and a valid pane tree for gestures', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const pane = { workspace: WORKTREE, tabId: 'tab-1', leafId: 'leaf-1' }
     const move = { type: 'movePane', ...pane, targetLeafId: 'leaf-2' }
     const ratios = { type: 'setPaneRatios', workspace: WORKTREE, tabId: 'tab-1' }
@@ -122,7 +127,9 @@ describe('layout.apply', () => {
   })
 
   it('accepts tab moves and group sizes, but no group id from the window', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const tab = { workspace: WORKTREE, tabId: 'tab-1' }
     const parse = (command: Record<string, unknown>) => apply?.params?.safeParse({ command })
 
@@ -161,7 +168,9 @@ describe('layout.apply', () => {
   })
 
   it('accepts the close of one tab with the window’s reason, but no force or refusals', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const close = { type: 'closeTabs', workspace: WORKTREE, recordClose: 'user' }
 
     expect(
@@ -179,7 +188,9 @@ describe('layout.apply', () => {
   })
 
   it('accepts a drag-out with the window’s terminal, but no tab id from the window', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const move = {
       type: 'movePaneToNewTab',
       workspace: WORKTREE,
@@ -200,7 +211,9 @@ describe('layout.apply', () => {
   })
 
   it('takes a browser tab under the window’s ids, and its page and profile changes', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const parse = (command: Record<string, unknown>) => apply?.params?.safeParse({ command })
     const open = {
       type: 'openBrowserTab',
@@ -249,7 +262,9 @@ describe('layout.apply', () => {
   })
 
   it('accepts an editor open under the window’s tab id, its promote, and an unrecorded close', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const tab = { workspace: WORKTREE, tabId: 'tab-1' }
     const open = { type: 'openEditorTab', ...tab, fileId: '/work/one/a.ts', contentType: 'editor' }
     const file = { filePath: '/work/one/a.ts', relativePath: 'a.ts', language: 'typescript' }
@@ -271,7 +286,9 @@ describe('layout.apply', () => {
   })
 
   it('accepts an editor tab move to the workspace the window resolved, naming its new ids', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const parse = (command: Record<string, unknown>) => apply?.params?.safeParse({ command })
     const move = {
       type: 'moveTabToWorkspace',
@@ -305,7 +322,9 @@ describe('layout.apply', () => {
   })
 
   it('accepts a sleep of one tab’s panes and a wake of exactly one pane', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const parse = (command: Record<string, unknown>) => apply?.params?.safeParse({ command })
     const paneKey = 'tab-1:11111111-1111-4111-8111-111111111111'
     const otherTabPane = 'tab-2:22222222-2222-4222-8222-222222222222'
@@ -354,7 +373,9 @@ describe('layout.apply', () => {
   })
 
   it('takes a terminal tab create under valid window ids, and only an activation initial', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const create = {
       type: 'createTerminalTab',
       workspace: WORKTREE,
@@ -391,7 +412,9 @@ describe('layout.apply', () => {
   })
 
   it('takes a tab’s custom title, color and pin, and no other tab kind or property', async () => {
-    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const apply = eraseRpcMethods(LAYOUT_APPLY_METHODS).find(
+      (method) => method.name === 'layout.apply'
+    )
     const tab = { workspace: WORKTREE, tabId: 'tab-1' }
     const parses = (command: Record<string, unknown>) =>
       apply?.params?.safeParse({ command: { ...tab, ...command } }).success

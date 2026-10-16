@@ -253,6 +253,7 @@ export const SQLITE_RUNTIME_INCLUDE = [
   'src/main/runtime/rpc/methods/agent-launch-session-reservation.test.ts',
   'src/main/runtime/rpc/methods/structured-agent-session-adoption-replay.test.ts',
   'src/main/runtime/rpc/methods/structured-agent-session-at-rest.test.ts',
+  'src/main/runtime/rpc/methods/structured-agent-session-close-before-create.test.ts',
   'src/main/runtime/rpc/methods/structured-agent-session-create-message.test.ts',
   'src/main/runtime/rpc/methods/structured-agent-session-hold.test.ts',
   'src/main/runtime/rpc/methods/structured-agent-session-options-workspace-scope.test.ts',

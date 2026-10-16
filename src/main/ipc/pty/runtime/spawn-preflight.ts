@@ -129,6 +129,7 @@ export async function prepareRuntimePtySpawn(
     deps: ctx.deps
   })
   ctx.launchCommand = hostEnv.launchCommand
+  ctx.codexResumeArgvDropped = hostEnv.codexResumeLaunch.droppedResumeArgv
   ctx.env = hostEnv.env
   ctx.selectedCodexHomePath = hostEnv.selectedCodexHomePath
   ctx.codexResumeHomeSelected = hostEnv.codexResumeHomeSelected

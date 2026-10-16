@@ -19816,7 +19816,8 @@
       "confirmBody": "Reiniciar termina todos los procesos que se ejecutan en {{sessions}}. Los agentes que admiten reanudación pueden reanudarse después; los shells y otros trabajos no, y deben iniciarse de nuevo. Hazlo cuando tus agentes estén inactivos.",
       "cancel": "Cancelar",
       "confirm": "Reiniciar y terminar procesos"
-    }
+    },
+    "restartedInputNotSent": "El terminal se reinició mientras escribías, así que parte de la entrada puede no haberle llegado. Revisa el nuevo shell antes de volver a escribirla."
   },
   "quickOpen": {
     "moreMatchesAvailable": "Puede haber más coincidencias disponibles. Refina tu búsqueda para acotar los resultados.",

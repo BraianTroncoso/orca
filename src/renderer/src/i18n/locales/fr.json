@@ -19852,7 +19852,8 @@
       "confirmBody": "Le redémarrage met fin à tous les processus en cours d'exécution dans {{sessions}}. Les agents qui prennent en charge la reprise peuvent être repris ensuite ; les shells et autres tâches ne le peuvent pas et doivent être redémarrés. Faites-le lorsque vos agents sont inactifs.",
       "cancel": "Annuler",
       "confirm": "Redémarrer et arrêter les processus"
-    }
+    },
+    "restartedInputNotSent": "Le terminal a redémarré pendant votre saisie, une partie ne lui est peut-être pas parvenue. Vérifiez le nouveau shell avant de la saisir à nouveau."
   },
   "fileSearch": {
     "failed": "La recherche a échoué. Essayer à nouveau."

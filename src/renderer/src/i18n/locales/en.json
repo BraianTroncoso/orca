@@ -19806,7 +19806,8 @@
       "confirmBody": "Restarting ends every process running in {{sessions}}. Agents that support resume can be resumed afterwards; shells and other jobs cannot and must be started again. Do this when your agents are idle.",
       "cancel": "Cancel",
       "confirm": "Restart and end processes"
-    }
+    },
+    "restartedInputNotSent": "The terminal restarted while you were typing, so some input may not have reached it. Check the new shell before typing it again."
   },
   "fileExplorer": {
     "root": {

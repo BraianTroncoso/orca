@@ -1912,6 +1912,10 @@ export function createRemoteRuntimePtyTransport(
     }
   }
 
+  // Why: one-shot terminal.send (hosts without input acks) bypasses the journal, so a remount
+  // must learn of its in-flight or refused input here to warn that it may be lost.
+  let fallbackSendsInFlight = 0
+  let fallbackInputRefused = false
   const sendUnacknowledgedInput = (text: string, queryReply = false): boolean => {
     const targetHandle = handle
     const targetLifecycleEpoch = lifecycleEpoch
@@ -1938,6 +1942,7 @@ export function createRemoteRuntimePtyTransport(
       queuePendingClaimInput(text, queryReply)
       return true
     }
+    fallbackSendsInFlight += 1
     void trackTerminalSend(
       targetHandle,
       callRuntime<{ send: RuntimeTerminalSend }>('terminal.send', {
@@ -1948,6 +1953,7 @@ export function createRemoteRuntimePtyTransport(
       })
     )
       .then((result) => {
+        fallbackInputRefused = result.send.accepted !== true
         if (
           connected &&
           lifecycleEpoch === targetLifecycleEpoch &&
@@ -1962,10 +1968,14 @@ export function createRemoteRuntimePtyTransport(
           return
         }
         if (runtimeTerminalErrorMessage(error).includes('terminal_not_writable')) {
+          fallbackInputRefused = true
           notifyWriteUnavailable()
         } else {
           handleRemoteTerminalError(error)
         }
+      })
+      .finally(() => {
+        fallbackSendsInFlight -= 1
       })
     return true
   }
@@ -2702,6 +2712,10 @@ export function createRemoteRuntimePtyTransport(
         },
         onWriteUnavailable: () => {
           if (isCurrentSubscription()) {
+            // Without input acks the frame answers refused input, which the journal never held.
+            if (handle && getCurrentMultiplexedStream(handle)?.acknowledgesInput() !== true) {
+              fallbackInputRefused = true
+            }
             notifyWriteUnavailable()
           }
         },
@@ -3325,6 +3339,16 @@ export function createRemoteRuntimePtyTransport(
     // Why: a transport with an armed retry or a parked one owns this pane's recovery; a remount would race it (#21195).
     ownsRecovery() {
       return !destroyed && !terminalEnded && recoveryBlocksIo()
+    },
+
+    hasUndeliveredInput() {
+      return (
+        inputJournal.hasUnacknowledgedInput() ||
+        inputBatcher.hasPendingInput() ||
+        recoveryInputHold.hasPendingInput() ||
+        fallbackSendsInFlight > 0 ||
+        fallbackInputRefused
+      )
     },
 
     claimViewport(cols: number, rows: number): boolean {

@@ -19852,7 +19852,8 @@
       "confirmBody": "重新启动会结束 {{sessions}} 中运行的所有进程。支持恢复的智能体之后可以恢复；shell 和其他作业则不能，必须重新启动。请在智能体空闲时执行此操作。",
       "cancel": "取消",
       "confirm": "重新启动并结束进程"
-    }
+    },
+    "restartedInputNotSent": "终端在您输入时重新启动，部分输入可能未送达。请先查看新的 shell，再重新输入。"
   },
   "fileSearch": {
     "failed": "搜索失败。再试一次。"
