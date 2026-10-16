@@ -52,17 +52,22 @@ export function hasCodexTranscriptSubagents(state: HookListenerState, paneKey: s
 export function setCodexMainAgentTurnState(
   state: HookListenerState,
   paneKey: string,
-  next: Omit<CodexLeadTurnState, 'stateStartedAt'> & { stateStartedAt?: number },
+  next: Omit<CodexLeadTurnState, 'stateStartedAt' | 'turnId'> & {
+    stateStartedAt?: number
+    /** Omitted keeps the current turn; null starts a turn Codex sent no id for. */
+    turnId?: string | null
+  },
   now = Date.now()
 ): CodexLeadTurnState {
   const previous = state.codexLeadStateByPaneKey.get(paneKey)
   const continued = continueMainAgentStatus(previous, next, now)
+  const turnId = next.turnId === null ? undefined : (next.turnId ?? previous?.turnId)
   const record: CodexLeadTurnState = {
     state: next.state,
     ...(continued.outcome ? { outcome: continued.outcome } : {}),
     stateStartedAt: continued.stateStartedAt,
     model: next.model,
-    ...(next.turnId ? { turnId: next.turnId } : {})
+    ...(turnId ? { turnId } : {})
   }
   state.codexLeadStateByPaneKey.set(paneKey, record)
   return record
@@ -80,11 +85,14 @@ export function settleCodexLeadTurnFromTranscript(state: HookListenerState, pane
   if (!end) {
     return
   }
+  if (!hasCodexTranscriptSubagents(state, paneKey)) {
+    // Why: the rollout's turn end stands in for the missing Stop, so it retires hook-only children the same way.
+    state.codexSubagentRosterByPaneKey.delete(paneKey)
+  }
   setCodexMainAgentTurnState(state, paneKey, {
     state: 'done',
     ...(end === 'failed' ? { outcome: 'failure' as const } : {}),
-    model: lead.model,
-    turnId: lead.turnId
+    model: lead.model
   })
 }
 
@@ -236,8 +244,15 @@ export function reconcileRemoteCodexState(
       })
     }
   } else {
-    const leadState = codexLeadStateForHookEvent(eventName, payload.state)
-    if (eventName === 'SessionStart' || (eventName === 'Stop' && !payload.subagents)) {
+    const eventLeadState = codexLeadStateForHookEvent(eventName, payload.state)
+    // Why: the host settles a hook for an already finished turn from its rollout, so its verdict outranks the event name.
+    const hostSettled =
+      eventName !== undefined && eventLeadState !== 'done' && payload.mainAgent?.state === 'done'
+    const leadState = hostSettled ? 'done' : eventLeadState
+    if (
+      eventName === 'SessionStart' ||
+      ((eventName === 'Stop' || hostSettled) && !payload.subagents)
+    ) {
       roster.clear()
     }
     if (leadState) {

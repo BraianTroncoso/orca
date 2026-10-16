@@ -58,17 +58,7 @@ export function transcriptPollUpdate<T extends AgentHookEventPayload>(
   const leadChanged =
     polled.payload.mainAgent?.state !== original.payload.mainAgent?.state ||
     polled.payload.mainAgent?.outcome !== original.payload.mainAgent?.outcome
-  if (!subagentsChanged && !leadChanged) {
-    return undefined
-  }
-  return {
-    ...polled,
-    hasExplicitPrompt: undefined,
-    hookEventName:
-      polled.payload.mainAgent?.state === 'done' &&
-      !polled.payload.interrupted &&
-      !polled.toolAgentId
-        ? 'Stop'
-        : undefined
-  }
+  return subagentsChanged || leadChanged
+    ? { ...polled, hasExplicitPrompt: undefined, hookEventName: undefined }
+    : undefined
 }

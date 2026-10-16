@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentHookServer } from './server'
@@ -70,9 +77,9 @@ describe('Codex review turn completion', () => {
       { timeout: 3_000 }
     )
 
-    const nextPath = join(directory, 'next-root.jsonl')
-    writeFileSync(
-      nextPath,
+    // A newer turn in the same rollout must not be settled by the review's recorded end.
+    appendFileSync(
+      childPath,
       '{"type":"event_msg","payload":{"type":"task_started","turn_id":"next-turn"}}\n'
     )
     const next = await postHookEvent(
@@ -80,7 +87,7 @@ describe('Codex review turn completion', () => {
       buildBody({
         hook_event_name: 'UserPromptSubmit',
         session_id: 'root-session',
-        transcript_path: nextPath,
+        transcript_path: childPath,
         turn_id: 'next-turn',
         prompt: 'Next task'
       }),
@@ -90,8 +97,62 @@ describe('Codex review turn completion', () => {
     await new Promise((resolve) => setTimeout(resolve, 1_200))
     expect(server.getStatusSnapshot()[0]).toMatchObject({
       state: 'working',
-      mainAgent: { state: 'working' },
-      providerSession: { transcriptPath: nextPath }
+      mainAgent: { state: 'working' }
     })
+  })
+
+  it('settles a failed turn without Stop after a child finished in its rollout', async () => {
+    directory = mkdtempSync(join(tmpdir(), 'codex-failed-turn-'))
+    const day = join(directory, '2026', '10', '16')
+    mkdirSync(day, { recursive: true })
+    const rootPath = join(day, 'rollout-2026-10-16T00-00-00-root.jsonl')
+    const childId = '0199aaaa-bbbb-cccc-dddd-eeeeffff0001'
+    const childPath = join(day, `rollout-2026-10-16T00-00-01-${childId}.jsonl`)
+    const event = (payload: object): string => `${JSON.stringify({ type: 'event_msg', payload })}\n`
+    writeFileSync(rootPath, event({ type: 'task_started', turn_id: 'root-turn' }))
+    server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    const hook = (hookEventName: string, extra: Record<string, unknown> = {}) =>
+      postHookEvent(
+        server!,
+        buildBody({
+          hook_event_name: hookEventName,
+          session_id: 'root-session',
+          transcript_path: rootPath,
+          turn_id: 'root-turn',
+          ...extra
+        }),
+        '/hook/codex'
+      )
+
+    expect((await hook('UserPromptSubmit', { prompt: 'Do the task' })).status).toBe(204)
+    appendFileSync(
+      rootPath,
+      event({
+        type: 'sub_agent_activity',
+        agent_thread_id: childId,
+        kind: 'started',
+        occurred_at_ms: Date.now()
+      })
+    )
+    writeFileSync(childPath, event({ type: 'task_started', turn_id: 'child-turn' }))
+    expect((await hook('PostToolUse', { tool_name: 'spawn_agent' })).status).toBe(204)
+
+    // The child's end is published as its own status update before the root turn fails.
+    appendFileSync(childPath, event({ type: 'task_complete', turn_id: 'child-turn' }))
+    await new Promise((resolve) => setTimeout(resolve, 1_200))
+    appendFileSync(
+      rootPath,
+      event({ type: 'task_complete', turn_id: 'root-turn', error: { message: 'usage limit' } })
+    )
+    await vi.waitFor(
+      () => {
+        expect(server?.getStatusSnapshot()[0]).toMatchObject({
+          state: 'done',
+          mainAgent: { state: 'done', outcome: 'failure' }
+        })
+      },
+      { timeout: 3_000 }
+    )
   })
 })
