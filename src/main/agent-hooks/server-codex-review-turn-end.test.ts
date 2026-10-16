@@ -20,7 +20,8 @@ const reviewRecords = readFileSync(
 )
   .trimEnd()
   .split('\n')
-const event = (payload: object): string => `${JSON.stringify({ type: 'event_msg', payload })}\n`
+const event = (payload: Record<string, unknown>): string =>
+  `${JSON.stringify({ type: 'event_msg', payload })}\n`
 const settle = (ms = 1_200) => new Promise((resolve) => setTimeout(resolve, ms))
 
 describe('Codex turn completion without Stop', () => {
