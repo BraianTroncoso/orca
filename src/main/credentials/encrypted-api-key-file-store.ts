@@ -11,6 +11,8 @@ import type { SecretAtRestProtection } from '../../shared/secret-at-rest-protect
 import { ApiKeyFileUnreadableError } from './api-key-file-unreadable-error'
 
 type EncryptedApiKeyFileStore = {
+  /** Where the envelope lives and how it starts, for orcad's plaintext migration. */
+  envelopeFile: () => { path: string; envelopePrefix: string }
   protection: () => SecretAtRestProtection | null
   has: () => boolean
   save: (key: string) => void
@@ -173,5 +175,12 @@ export function createEncryptedApiKeyFileStore({
     rmSync(getApiKeyPath(), { force: true })
   }
 
-  return { has, save, read, clear, protection }
+  return {
+    has,
+    save,
+    read,
+    clear,
+    protection,
+    envelopeFile: () => ({ path: getApiKeyPath(), envelopePrefix })
+  }
 }

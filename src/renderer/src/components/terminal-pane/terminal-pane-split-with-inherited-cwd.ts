@@ -5,7 +5,7 @@ import type { PtyTransport } from './pty-transport-types'
 import { resolveSplitCwd, type PaneCwdMap } from './resolve-split-cwd'
 import { recordCreatedTerminalPaneSplit } from './terminal-pane-split-completion'
 import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../shared/layout-owner-switch'
-import { sendPaneCommandToLayoutOwner } from './terminal-pane-layout-owner-commands'
+import { sendLayoutCommandToOwner } from '@/runtime/layout-owner-command'
 
 type SplitArgs = {
   worktreeId: string
@@ -34,11 +34,11 @@ export function splitTerminalPaneWithInheritedCwd(args: SplitArgs): void {
   // Switch point: main writes the split and mints the new pane's id; the window then mounts it.
   if (
     ORCA_LAYOUT_OWNER_IS_MAIN &&
-    sendPaneCommandToLayoutOwner(
+    sendLayoutCommandToOwner(
       args.worktreeId,
       { type: 'splitPane', tabId: args.tabId, leafId: args.pane.leafId, direction: args.direction },
       {
-        apply: ({ leafId }) => leafId && splitLocally(args, ptyId, leafId),
+        apply: ({ leafId }) => leafId && mountMainSplit(args, ptyId, leafId),
         asToday: () => splitLocally(args, ptyId)
       }
     )
@@ -46,6 +46,20 @@ export function splitTerminalPaneWithInheritedCwd(args: SplitArgs): void {
     return
   }
   splitLocally(args, ptyId)
+}
+
+/** Mounts main's new pane, or withdraws it when its source pane or manager went meanwhile. */
+function mountMainSplit(args: SplitArgs, ptyId: string | null, leafId: string): void {
+  splitLocally(args, ptyId, leafId)
+  const manager = args.getManager ? args.getManager() : args.manager
+  if (manager?.getNumericIdForLeaf(leafId) == null) {
+    const keep = (): void => {}
+    sendLayoutCommandToOwner(
+      args.worktreeId,
+      { type: 'closePane', tabId: args.tabId, leafId },
+      { apply: keep, asToday: keep }
+    )
+  }
 }
 
 function splitLocally(args: SplitArgs, ptyId: string | null, leafId?: string): void {
