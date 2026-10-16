@@ -4,6 +4,8 @@ import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import type { TabGroupLayoutNode } from '../../../shared/tab-types'
 import type { TerminalPaneLayoutNode } from '../../../shared/terminal-tab-types'
 import type { PaneSide } from '../../../shared/workspace-layout/terminal-pane-tree'
+import type { LayoutEditorFile } from '../../../shared/workspace-layout/workspace-layout-model'
+import type { EditorTabContentType } from '@/store/slices/editor/tabs/editor-tab-content-type'
 import type {
   GroupSide,
   LayoutApplyReply,
@@ -11,7 +13,7 @@ import type {
   LayoutRefusalCode
 } from '../../../shared/workspace-layout/workspace-layout-command-types'
 
-/** The commands a window sends `layout.apply`; main mints any new id but a browser tab's. */
+/** What a window sends `layout.apply`; main mints any new id but a browser or editor tab's. */
 export type WindowLayoutCommand =
   | { type: 'splitPane'; tabId: string; leafId: string; direction: 'vertical' | 'horizontal' }
   | { type: 'closePane'; tabId: string; leafId: string }
@@ -22,7 +24,7 @@ export type WindowLayoutCommand =
   | { type: 'moveTab'; tabId: string; toGroupId: string; index: number }
   | { type: 'splitGroup'; tabId: string; besideGroupId: string; direction: GroupSide }
   | { type: 'setGroupRatios'; groupLayout: TabGroupLayoutNode }
-  | { type: 'closeTabs'; tabIds: [string]; recordClose: 'user' | 'cleanup' }
+  | { type: 'closeTabs'; tabIds: [string]; recordClose?: 'user' | 'cleanup' }
   | { type: 'renameTab'; tabId: string; kind: 'custom'; title: string | null }
   | { type: 'setTabProps'; tabId: string; color?: string | null; isPinned?: boolean }
   | {
@@ -52,6 +54,16 @@ export type WindowLayoutCommand =
       profileId: string | null
       sessionPartition: string | null
     }
+  | {
+      type: 'openEditorTab'
+      tabId: string
+      fileId: string
+      contentType: EditorTabContentType
+      file?: LayoutEditorFile
+      groupId?: string
+      preview?: true
+    }
+  | { type: 'promotePreviewTab'; tabId: string }
 
 export type LayoutApplyHandlers = {
   apply: (result: LayoutCommandResult) => void

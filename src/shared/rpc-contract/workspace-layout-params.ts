@@ -85,12 +85,40 @@ const SetGroupRatiosCommand = z.object({
   groupLayout: TerminalOrphanGroupLayout
 })
 
-/** The window's close of one tab it already closed; main records it, the window's reason kept. */
+/**
+ * The window's close of one tab it already closed; main records a terminal's close with the
+ * window's reason. An editor tab's close records nothing.
+ */
 const CloseTabsCommand = z.object({
   type: z.literal('closeTabs'),
   workspace: OnPane.workspace,
   tabIds: z.tuple([z.string().min(1)]),
-  recordClose: z.enum(['user', 'cleanup'])
+  recordClose: z.enum(['user', 'cleanup']).optional()
+})
+
+/** An edit-mode file's restorable record, as the window saves it. */
+const EditorFileRecord = z.object({
+  filePath: z.string().min(1),
+  relativePath: z.string(),
+  language: z.string(),
+  runtimeEnvironmentId: z.string().nullable().optional(),
+  externalSshTargetId: z.string().min(1).optional(),
+  readOnly: z.literal(true).optional(),
+  liveTail: z.literal(true).optional()
+})
+
+/**
+ * An editor tab under the id the window drew it with: its callers act on the tab at once. Main
+ * places it and replaces the group's preview by the same rules as the window.
+ */
+const OpenEditorTabCommand = z.object({
+  type: z.literal('openEditorTab'),
+  ...OnTab,
+  fileId: z.string().min(1),
+  contentType: z.enum(['editor', 'diff', 'conflict-review', 'check-details']),
+  file: EditorFileRecord.optional(),
+  groupId: z.string().min(1).optional(),
+  preview: z.literal(true).optional()
 })
 
 /** A window's drag-out of one pane into a new tab; main mints the tab's id. */
@@ -187,10 +215,13 @@ const SetBrowserTabProfileCommand = z.object({
   sessionPartition: z.string().min(1).nullable()
 })
 
+const PromotePreviewTabCommand = z.object({ type: z.literal('promotePreviewTab'), ...OnTab })
+
 /**
  * A window's layout command (`layout.apply`, registered only in a layout-owner build). The window
- * names what it acts on; main mints every new id but a created tab's (see CreateTerminalTabCommand)
- * and a browser tab's and page's, which the window already shows (see OpenBrowserTabCommand).
+ * names what it acts on; main mints every new id but a created terminal tab's
+ * (see CreateTerminalTabCommand), a browser tab's and page's, which the window already shows
+ * (see OpenBrowserTabCommand), and an editor tab's (see OpenEditorTabCommand).
  */
 export const LayoutApplyParams = z.object({
   command: z.discriminatedUnion('type', [
@@ -212,6 +243,8 @@ export const LayoutApplyParams = z.object({
     OpenBrowserPageCommand,
     CloseBrowserPageCommand,
     ReplaceBrowserPageCommand,
-    SetBrowserTabProfileCommand
+    SetBrowserTabProfileCommand,
+    OpenEditorTabCommand,
+    PromotePreviewTabCommand
   ])
 })

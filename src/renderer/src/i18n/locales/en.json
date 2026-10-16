@@ -12880,6 +12880,13 @@
           "confirm": "Restart",
           "terminalsUnknown": "Orca couldn’t confirm whether terminals are running on this host, so it didn’t restart the managed server.",
           "terminalsRunning": "{{count}} terminals are still running on this host. Close them, then restart the managed server."
+        },
+        "keychainCredentialNotice": {
+          "locked": "{{service}} is unavailable on {{host}}: its macOS login Keychain is locked. This happens after a reboot when you only sign in over SSH. Sign in to that Mac at its screen once. Orca then offers to switch the host to file storage so this stops happening.",
+          "unnamedHost": "the remote server",
+          "moved": "Switched {{host}} to file storage",
+          "offerMove": "{{host}} keeps its credential key in its macOS login Keychain, which was locked after a reboot. Switch to file storage to keep Linear and Jira working when you only sign in over SSH. The key then sits in a file only this account can read, which protects it less than the Keychain: it is not tied to this machine, so a backup or shared copy of ~/.orca can open the credentials.",
+          "moveAction": "Switch to file storage"
         }
       },
       "right": {

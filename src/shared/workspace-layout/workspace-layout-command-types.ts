@@ -101,6 +101,8 @@ export type LayoutCommand =
   | (On & { type: 'setChatPane'; tabId: string; leafId: string | null })
   | (On & {
       type: 'openEditorTab'
+      /** The window's id for a tab it drew first; minted when absent. */
+      tabId?: string
       /** The editor's file id: the tab's entity. */
       fileId: string
       contentType: Exclude<TabContentType, 'terminal' | 'browser' | 'agent-session' | 'simulator'>

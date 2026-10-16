@@ -1,8 +1,19 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { spawnProcess } from '@orca/process-host'
 import { describe, expect, it, vi } from 'vitest'
 import { readAgentProcess } from '../../shared/agent-process-presence-probe'
 import type { LinuxStatEvidence } from '../daemon/daemon-incarnation-evidence-types'
-import { killAndAwaitExit, waitForProcessExit } from './orcad-daemon-teardown-fixture'
+import { DaemonEndpointOwnershipError } from '../daemon/daemon-endpoint-adoption'
+import { cleanupDaemonForProtocol } from '../daemon/daemon-protocol-cleanup'
+import {
+  killAndAwaitExit,
+  killProfileDaemons,
+  waitForProcessExit
+} from './orcad-daemon-teardown-fixture'
+
+vi.mock('../daemon/daemon-protocol-cleanup', () => ({ cleanupDaemonForProtocol: vi.fn() }))
 
 const ZOMBIE_PARENT = `
 import os, select, sys
@@ -183,4 +194,77 @@ describe('daemon teardown exit proof', () => {
       }
     }
   )
+})
+
+describe('profile daemon cleanup after loss of contact', () => {
+  const unverified = () =>
+    new DaemonEndpointOwnershipError(
+      'Daemon cleanup aborted: the expected daemon could not be verified'
+    )
+
+  async function exitedChildPid(): Promise<number> {
+    const child = spawnProcess({ program: process.execPath, args: ['-e', ''], timeoutMs: null })
+    const pid = child.pid
+    await new Promise<void>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', () => resolve())
+    })
+    if (!pid) {
+      throw new Error('Child did not start')
+    }
+    return pid
+  }
+
+  function profile(pid: number, onTestFinished: (cleanup: () => void) => void): string {
+    const root = mkdtempSync(join(tmpdir(), 'orca-profile-exit-'))
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }))
+    mkdirSync(join(root, 'daemon'))
+    writeFileSync(join(root, 'daemon', 'daemon-v1.pid'), JSON.stringify({ pid }))
+    return root
+  }
+
+  it('accepts an unverified endpoint only after the recorded process has exited', async ({
+    onTestFinished
+  }) => {
+    const pid = await exitedChildPid()
+    vi.mocked(cleanupDaemonForProtocol).mockRejectedValueOnce(unverified())
+    await expect(killProfileDaemons(profile(pid, onTestFinished))).resolves.toBeUndefined()
+  })
+
+  it('still rejects a live recorded process at the exit deadline without killing it', async ({
+    onTestFinished
+  }) => {
+    vi.mocked(cleanupDaemonForProtocol).mockRejectedValueOnce(unverified())
+    const root = profile(process.pid, onTestFinished)
+    const signal = vi.spyOn(process, 'kill')
+    vi.useFakeTimers()
+    try {
+      const result = killProfileDaemons(root).then(
+        () => null,
+        (error: unknown) => error
+      )
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(await result).toMatchObject({
+        errors: [expect.objectContaining({ message: `Processes did not exit: ${process.pid}` })]
+      })
+      expect(signal).toHaveBeenCalledWith(process.pid, 0)
+      expect(signal.mock.calls.every(([, mode]) => mode === 0)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+      signal.mockRestore()
+    }
+  })
+
+  it.for([
+    new DaemonEndpointOwnershipError(
+      'Daemon cleanup aborted: the endpoint is owned by a different daemon than expected'
+    ),
+    new Error('unexpected cleanup failure')
+  ])('preserves %s even when the recorded process exited', async (error, { onTestFinished }) => {
+    const pid = await exitedChildPid()
+    vi.mocked(cleanupDaemonForProtocol).mockRejectedValueOnce(error)
+    await expect(killProfileDaemons(profile(pid, onTestFinished))).rejects.toMatchObject({
+      errors: [error]
+    })
+  })
 })

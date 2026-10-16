@@ -9,6 +9,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { removeTree } from '../../shared/windows-transient-lock-removal'
 import { parseLinuxStartTicks } from '../agent-hooks/managed-hook-owner-identity'
+import { DaemonEndpointOwnershipError } from '../daemon/daemon-endpoint-adoption'
 import { parseLinuxProcessState } from '../daemon/daemon-incarnation-evidence'
 import { readDaemonPidRecord } from '../daemon/daemon-endpoint-incarnation'
 import { readLinuxStat } from '../daemon/daemon-process-inspection'
@@ -123,7 +124,17 @@ export async function killProfileDaemons(userData: string): Promise<void> {
   })
   const results = await Promise.allSettled(
     daemons.map(async ({ pid, protocolVersion }) => {
-      await cleanupDaemonForProtocol(daemonDir, protocolVersion, pid)
+      try {
+        await cleanupDaemonForProtocol(daemonDir, protocolVersion, pid)
+      } catch (error) {
+        // Natural retirement can close authentication; only OS exit proof can finish teardown.
+        if (
+          !(error instanceof DaemonEndpointOwnershipError) ||
+          error.message !== 'Daemon cleanup aborted: the expected daemon could not be verified'
+        ) {
+          throw error
+        }
+      }
       await waitForProcessExit([pid])
     })
   )

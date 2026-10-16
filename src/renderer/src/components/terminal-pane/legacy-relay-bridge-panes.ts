@@ -14,6 +14,7 @@ const listeners = new Set<() => void>()
 /** Which pane (tab and leaf) holds each bridged PTY; a second pane never drives the same shell. */
 const claims = new Map<string, string>()
 let subscribed = false
+let firstListing: Promise<void> = Promise.resolve()
 
 function ensureSubscribed(): void {
   const api = typeof window === 'undefined' ? undefined : window.api?.legacyRelayBridge
@@ -31,7 +32,13 @@ function ensureSubscribed(): void {
     listeners.forEach((listener) => listener())
   }
   api.onPanes(apply)
-  void api.listPanes().then(apply, () => {})
+  firstListing = api.listPanes().then(apply, () => {})
+}
+
+/** Settles once main's first pane list arrived, so a close never reads the empty initial cache. */
+export function legacyRelayBridgedPanesListed(): Promise<void> {
+  ensureSubscribed()
+  return firstListing
 }
 
 ensureSubscribed()
@@ -85,6 +92,26 @@ export function isLegacyRelayBridgedTab(tabId: string, leafId?: string | null): 
 /** Whether any pane in this tab is one the bridge serves. */
 export function hasLegacyRelayBridgedPane(tabId: string): boolean {
   return bridgedPanesInTab(tabId, null).inTab.length > 0
+}
+
+/**
+ * The bridged PTYs a closing tab runs: the panes main lists for its relay-era tab (only the named
+ * leaf for a `tab::leaf` mirror), plus any bridged PTY the tab itself was bound to.
+ */
+export function legacyRelayBridgedPtyIdsForClosingTab(
+  tabId: string,
+  boundPtyIds: readonly string[]
+): string[] {
+  const { inTab, leaf } = bridgedPanesInTab(tabId, null)
+  const named =
+    leaf === null ? inTab : [bridgedPaneFor(tabId, null)].filter((pane) => pane !== undefined)
+  const ids = new Set(named.map((pane) => pane.ptyId))
+  for (const ptyId of boundPtyIds) {
+    if (panes.some((pane) => pane.ptyId === ptyId)) {
+      ids.add(ptyId)
+    }
+  }
+  return [...ids]
 }
 
 /**

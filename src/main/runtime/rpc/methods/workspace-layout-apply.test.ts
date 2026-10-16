@@ -248,6 +248,43 @@ describe('layout.apply', () => {
     expect(applyLayoutCommand).toHaveBeenCalledWith(page, ['local'])
   })
 
+  it('accepts an editor open under the window’s tab id, its promote, and an unrecorded close', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const tab = { workspace: WORKTREE, tabId: 'tab-1' }
+    const open = { type: 'openEditorTab', ...tab, fileId: '/work/one/a.ts', contentType: 'editor' }
+    const file = { filePath: '/work/one/a.ts', relativePath: 'a.ts', language: 'typescript' }
+    const parse = (command: Record<string, unknown>) => apply?.params?.safeParse({ command })
+
+    expect(
+      apply?.params?.parse({
+        command: { ...open, file: { ...file, dirtyDraftContent: 'x' }, view: { mode: 'edit' } }
+      })
+    ).toEqual({ command: { ...open, file } })
+    expect(parse({ ...open, preview: true, groupId: 'g1' })?.success).toBe(true)
+    expect(parse({ ...open, tabId: undefined })?.success).toBe(false)
+    expect(parse({ ...open, contentType: 'terminal' })?.success).toBe(false)
+    expect(parse({ ...open, preview: false })?.success).toBe(false)
+    expect(parse({ type: 'promotePreviewTab', ...tab })?.success).toBe(true)
+    expect(
+      apply?.params?.parse({ command: { type: 'closeTabs', workspace: WORKTREE, tabIds: ['e1'] } })
+    ).toEqual({ command: { type: 'closeTabs', workspace: WORKTREE, tabIds: ['e1'] } })
+  })
+
+  it('opens an editor tab in the workspace’s routed partition', async () => {
+    const { runtime, applyLayoutCommand } = runtimeHolding('ssh:target-1')
+    const open = {
+      type: 'openEditorTab',
+      workspace: WORKTREE,
+      tabId: 'editor-tab',
+      fileId: '/work/one/a.ts',
+      contentType: 'editor'
+    } as const
+
+    await runtime.applyLayoutCommand(open)
+
+    expect(applyLayoutCommand).toHaveBeenCalledWith(open, ['local'])
+  })
+
   it('applies group sizes to the workspace’s routed partition', async () => {
     const { runtime, applyLayoutCommand } = runtimeHolding('ssh:target-1')
     const ratios = {
