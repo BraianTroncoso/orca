@@ -56,19 +56,19 @@ describe('useMobileNativeChatPageHistory', () => {
 
   it('draws history that loads above the list in its header, leaving the list its rows', async () => {
     await show(rows('a', 'b'))
-    expect(history?.listRows).toEqual(rows('a', 'b'))
+    expect(history?.list.data).toEqual(rows('a', 'b'))
     expect(headerRows()).toEqual([])
 
     await show(rows('x', 'y', 'a', 'b'))
 
     // RN Web's list draws by index: handing it the new rows would redraw a different set.
-    expect(history?.listRows).toEqual(rows('a', 'b'))
+    expect(history?.list.data).toEqual(rows('a', 'b'))
     expect(headerRows()).toEqual([
       { id: 'x', index: 0 },
       { id: 'y', index: 1 }
     ])
     // The list's first row is the third row of the chat, and is drawn as that.
-    history?.renderListRow({ item: { id: 'a' }, index: 0 })
+    history?.list.renderItem({ item: { id: 'a' }, index: 0 })
     expect(renderRow).toHaveBeenLastCalledWith({ item: { id: 'a' }, index: 2 })
   })
 
@@ -78,7 +78,7 @@ describe('useMobileNativeChatPageHistory', () => {
 
     await show(rows('p', 'q'))
 
-    expect(history?.listRows).toEqual(rows('p', 'q'))
+    expect(history?.list.data).toEqual(rows('p', 'q'))
     expect(headerRows()).toEqual([])
   })
 
@@ -89,8 +89,8 @@ describe('useMobileNativeChatPageHistory', () => {
 
     await show(all)
 
-    expect(history?.listRows).toBe(all)
-    expect(history?.renderListRow).toBe(renderRow)
+    expect(history?.list.data).toBe(all)
+    expect(history?.list.renderItem).toBe(renderRow)
     expect(headerRows()).toEqual([])
   })
 })

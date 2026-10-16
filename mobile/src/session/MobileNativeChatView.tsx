@@ -369,9 +369,8 @@ export function MobileNativeChatView({
           <GestureDetector gesture={pinchGesture}>
             <FlatList
               ref={attachList}
-              data={history.listRows}
+              {...history.list}
               keyExtractor={rowKeys.keyOf}
-              renderItem={history.renderListRow}
               contentContainerStyle={styles.listContent}
               // Let link/file taps land while the composer keyboard is up
               // instead of being swallowed by the dismiss gesture.

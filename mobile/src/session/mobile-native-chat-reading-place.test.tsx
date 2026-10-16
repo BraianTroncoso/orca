@@ -160,8 +160,8 @@ function Chat(props: {
       listRef: props.listRef
     }),
     h('div', { testID: 'header' }, history.withHistory(h('span', null, 'Load earlier'))),
-    history.listRows.map((item, index) =>
-      h(Fragment, { key: keys.keyOf(item) }, history.renderListRow({ item, index }))
+    history.list.data.map((item, index) =>
+      h(Fragment, { key: keys.keyOf(item) }, history.list.renderItem({ item, index }))
     ),
     props.live ? h('span', null, 'Working') : null
   )

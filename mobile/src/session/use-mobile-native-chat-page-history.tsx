@@ -13,8 +13,13 @@ export function useMobileNativeChatPageHistory<TItem>(
   renderRow: (row: Row<TItem>) => ReactElement,
   keys: { keyOf: (row: TItem) => string; current: (key: string) => string | undefined }
 ): {
-  listRows: readonly TItem[]
-  renderListRow: (row: Row<TItem>) => ReactElement
+  list: {
+    data: readonly TItem[]
+    renderItem: (row: Row<TItem>) => ReactElement
+    /** The list guesses unmeasured rows' places without its header, so under the history header
+     *  its spacers come out a header too tall; on the page it draws rows in order, with no spacers. */
+    disableVirtualization: boolean
+  }
   /** The list header: what was given, then the history loaded above the list's own rows. */
   withHistory: (header: ReactElement | null) => ReactElement | null
 } {
@@ -59,8 +64,11 @@ export function useMobileNativeChatPageHistory<TItem>(
     [historyRows, renderRow, keyOf]
   )
   return {
-    listRows,
-    renderListRow: historyCount === 0 ? renderRow : renderOffsetRow,
+    list: {
+      data: listRows,
+      renderItem: historyCount === 0 ? renderRow : renderOffsetRow,
+      disableVirtualization: onPage
+    },
     withHistory
   }
 }
