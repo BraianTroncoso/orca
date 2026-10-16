@@ -249,8 +249,8 @@ export function useMobileNativeChatPageWindow(args: {
       return
     }
     const scrolled = () => {
-      // A write's event can arrive after rows above grew and before the correction: taking the place
-      // or covering then would keep the pushed position and draw the rows that pushed it.
+      // A write's or a clamp's event can arrive after rows above changed and before the correction:
+      // taking the place or covering then would keep the moved position and draw what moved it.
       if (motion.scrolled(s.scrollTop)) {
         takeAnchor(s)
         cover(s)

@@ -64,11 +64,16 @@ export class MobileNativeChatPageMotion {
     }
   }
 
-  /** True for the reader's scroll; false for the event of one of the page's own writes. */
+  /** True for the reader's scroll; false for the event of one of the page's own writes, or of the
+   *  browser clamping the scroll when the document shrank (no input of theirs, and no scroll of theirs
+   *  just before, which momentum keeps up). */
   scrolled(scrollTop: number): boolean {
     const at = this.own.findIndex((target) => Math.abs(target - scrollTop) <= 1)
     if (at !== -1) {
       this.own.splice(0, at + 1)
+      return false
+    }
+    if (!this.intent() && Date.now() - this.lastReaderScroll >= REST_MS) {
       return false
     }
     this.lastReaderScroll = Date.now()
