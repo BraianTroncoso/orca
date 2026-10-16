@@ -26,7 +26,9 @@ export const LEGACY_RELAY_BRIDGE_CHANNELS = {
   write: 'legacyRelayBridge:write',
   resize: 'legacyRelayBridge:resize',
   detach: 'legacyRelayBridge:detach',
+  setOutputPaused: 'legacyRelayBridge:setOutputPaused',
   panes: 'legacyRelayBridge:panes',
   data: 'legacyRelayBridge:data',
+  replay: 'legacyRelayBridge:replay',
   exit: 'legacyRelayBridge:exit'
 } as const

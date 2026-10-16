@@ -21,7 +21,8 @@ import {
   killAndAwaitExit,
   killChildAndWait,
   killProfileDaemons,
-  removeTestRoot
+  removeTestRoot,
+  waitForProcessExit
 } from './orcad-daemon-teardown-fixture'
 
 const slotDir = resolve('out/orcad')
@@ -32,10 +33,28 @@ const skip = skipForMissingInputs('artifact', runtime ? [] : ['a Node orcad slot
 const roots: string[] = []
 
 afterEach(async () => {
-  for (const root of roots.splice(0)) {
-    // The terminal daemon outlives orcad by design; it must be gone before its profile is.
-    await killProfileDaemons(root)
-    await removeTestRoot(root)
+  const failures: unknown[] = []
+  // Stop every profile before removing any project root it may still use.
+  for (const root of roots) {
+    try {
+      await killProfileDaemons(root)
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Profile daemon shutdown incomplete')
+  }
+  for (const root of roots.slice()) {
+    try {
+      await removeTestRoot(root)
+      roots.splice(roots.indexOf(root), 1)
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Test root removal incomplete')
   }
 })
 
@@ -161,9 +180,10 @@ describe.skipIf(skip)('orca serve on orcad', () => {
       return JSON.parse(result.stdout.trim().split('\n').at(-1) ?? '{}')
     }
     const first = await serveOnce(userData)
-    let daemonPid: number | null = first
+    let shellPid: number | null = null
     try {
       const created = await session('create', 'BEFORE')
+      shellPid = created.pid
       expect(created).toMatchObject({ isReattach: false, output: true })
       await stopServe(userData)
       // The same daemon, in the same \`<userData>/daemon\` Electron serve uses, is adopted.
@@ -174,11 +194,7 @@ describe.skipIf(skip)('orca serve on orcad', () => {
         output: true
       })
     } finally {
-      await stopServe(userData)
-      if (daemonPid) {
-        await killAndAwaitExit([daemonPid])
-        daemonPid = null
-      }
+      await stopServeProfile(userData, shellPid)
     }
   }, 300_000)
 })
@@ -223,4 +239,23 @@ async function stopServe(userData: string): Promise<void> {
   const exited = new Promise((settle) => child.once('exit', settle))
   child.kill('SIGTERM')
   await exited
+}
+
+async function stopServeProfile(userData: string, shellPid: number | null): Promise<void> {
+  try {
+    await stopServe(userData)
+    await killProfileDaemons(userData)
+    if (shellPid) {
+      await waitForProcessExit([shellPid])
+    }
+  } catch (error) {
+    if (shellPid) {
+      try {
+        await killAndAwaitExit([shellPid])
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'Terminal shutdown incomplete')
+      }
+    }
+    throw error
+  }
 }

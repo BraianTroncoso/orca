@@ -103,6 +103,8 @@ export const ORCAD_PARCEL_WATCHER_ENTRY = 'node_modules/@parcel/watcher/index.js
 export const ORCAD_PARCEL_WATCHER_NATIVE = 'node_modules/@parcel/watcher/watcher.node'
 export const ORCAD_EMOJI_SHORTCODE_DATASET =
   'node_modules/emojibase-data/en/shortcodes/emojibase.json'
+// linear-sdk.ts loads it through createRequire, which the server bundle cannot follow.
+export const ORCAD_LINEAR_SDK_ENTRY = 'node_modules/@linear/sdk/index.js'
 
 export const ORCAD_VERSION = '0.1.0'
 export const ORCAD_LAUNCHER_FILENAME = 'orcad.js'
@@ -191,6 +193,7 @@ export const ORCAD_ARTIFACTS: readonly OrcadArtifact[] = [
   { filename: ORCAD_PARCEL_WATCHER_ENTRY },
   { filename: ORCAD_PARCEL_WATCHER_NATIVE },
   { filename: ORCAD_EMOJI_SHORTCODE_DATASET },
+  { filename: ORCAD_LINEAR_SDK_ENTRY },
   ...ORCAD_NODE_PTY_JS_ARTIFACTS.map((filename) => ({ filename })),
   ...ORCAD_RIPGREP_LICENSE_ARTIFACTS.map((filename) => ({ filename })),
   ...ORCAD_NATIVE_CHAT_VISUALS_ARTIFACTS.map((filename) => ({ filename }))

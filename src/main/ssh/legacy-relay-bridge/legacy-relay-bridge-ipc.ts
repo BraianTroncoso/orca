@@ -6,6 +6,7 @@ import { ipcMain, type BrowserWindow } from 'electron'
 import { z } from 'zod'
 import { LEGACY_RELAY_BRIDGE_CHANNELS as CHANNELS } from '../../../shared/legacy-relay-bridge-contract'
 import type { Store } from '../../persistence'
+import type { OrcaRuntimeService } from '../../runtime/orca-runtime'
 import { track } from '../../telemetry/client'
 import type { SshConnection } from '../ssh-connection'
 import { knownSshHostPlatform } from '../ssh-host-platform-memo'
@@ -16,6 +17,7 @@ import {
   installLegacyRelayBridge,
   legacyRelayBridgedPanes,
   resizeLegacyRelayPane,
+  setLegacyRelayPaneOutputPaused,
   terminalsBucket,
   writeLegacyRelayPane
 } from './legacy-relay-bridge-registry'
@@ -24,12 +26,14 @@ const PtyIdSchema = z.string().min(1).max(4096)
 const SizeSchema = z.number().int().positive().max(10_000)
 const PaneArgsSchema = z.object({ ptyId: PtyIdSchema })
 const WriteArgsSchema = z.object({ ptyId: PtyIdSchema, data: z.string() })
+const PausedArgsSchema = z.object({ ptyId: PtyIdSchema, paused: z.boolean() })
 const ResizeArgsSchema = z.object({ ptyId: PtyIdSchema, cols: SizeSchema, rows: SizeSchema })
 
 export function registerLegacyRelayBridgeIpc(args: {
-  store: Pick<Store, 'getSshRemotePtyLeases' | 'markSshRemotePtyLease'>
+  store: Pick<Store, 'getSshRemotePtyLeases' | 'markSshRemotePtyLease' | 'getSshTarget'>
   getMainWindow: () => BrowserWindow | null
   connection: (targetId: string) => SshConnection | null
+  runtime?: () => OrcaRuntimeService | null
 }): void {
   const send = (channel: string, payload: unknown): void => {
     const contents = args.getMainWindow()?.webContents
@@ -42,8 +46,19 @@ export function registerLegacyRelayBridgeIpc(args: {
     retireLease: (targetId, relayPtyId) =>
       args.store.markSshRemotePtyLease(targetId, relayPtyId, 'terminated'),
     connection: args.connection,
+    ...(args.runtime
+      ? {
+          remoteCli: {
+            runtime: args.runtime,
+            // Why strict true: the setting is opt-in, and an absent value is off.
+            allowed: (targetId: string) =>
+              args.store.getSshTarget(targetId)?.allowRemoteCliControl === true
+          }
+        }
+      : {}),
     onPanesChanged: (panes) => send(CHANNELS.panes, panes),
     onData: (ptyId, data) => send(CHANNELS.data, { ptyId, data }),
+    onReplay: (ptyId, replay) => send(CHANNELS.replay, { ptyId, replay }),
     onExit: (ptyId, code) => send(CHANNELS.exit, { ptyId, code }),
     report: (targetId, phase, terminals) => {
       try {
@@ -59,7 +74,12 @@ export function registerLegacyRelayBridgeIpc(args: {
   })
   ipcMain.removeHandler(CHANNELS.listPanes)
   ipcMain.removeHandler(CHANNELS.attach)
-  for (const channel of [CHANNELS.write, CHANNELS.resize, CHANNELS.detach]) {
+  for (const channel of [
+    CHANNELS.write,
+    CHANNELS.resize,
+    CHANNELS.setOutputPaused,
+    CHANNELS.detach
+  ]) {
     ipcMain.removeAllListeners(channel)
   }
   ipcMain.handle(CHANNELS.listPanes, () => legacyRelayBridgedPanes())
@@ -77,6 +97,12 @@ export function registerLegacyRelayBridgeIpc(args: {
     const args = ResizeArgsSchema.safeParse(payload)
     if (args.success) {
       resizeLegacyRelayPane(args.data.ptyId, args.data.cols, args.data.rows)
+    }
+  })
+  ipcMain.on(CHANNELS.setOutputPaused, (_event, payload: unknown) => {
+    const args = PausedArgsSchema.safeParse(payload)
+    if (args.success) {
+      setLegacyRelayPaneOutputPaused(args.data.ptyId, args.data.paused)
     }
   })
   ipcMain.on(CHANNELS.detach, (_event, payload: unknown) => {

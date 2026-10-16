@@ -228,6 +228,7 @@ export async function resolvePtySpawnHostEnv(args: PtySpawnHostEnvArgs): Promise
       isWsl,
       wslDistro,
       agentStatusHooksEnabled: isAgentStatusHooksEnabled(ptySettings),
+      terminalInlineImages: ptySettings?.terminalInlineImages,
       disabledTuiAgents: ptySettings?.disabledTuiAgents,
       networkProxySettings: ptySettings,
       routeBrowserOpensToClient: deps.runtime?.shouldRelayTerminalBrowserOpens?.(),

@@ -14,7 +14,7 @@ import {
 import type { TerminalPaneStartupController } from './use-terminal-pane-startup-actions'
 import type { PaneLayoutEditIntent } from '../../../../shared/rpc-contract/session-tabs-schemas-params'
 import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../shared/layout-owner-switch'
-import { sendPaneCommandToLayoutOwner } from './terminal-pane-layout-owner-commands'
+import { sendLayoutCommandToOwner } from '@/runtime/layout-owner-command'
 
 export function useTerminalPaneLayoutPersistence(controller: TerminalPaneStartupController) {
   const {
@@ -207,7 +207,7 @@ export function useTerminalPaneLayoutPersistence(controller: TerminalPaneStartup
       if (
         ORCA_LAYOUT_OWNER_IS_MAIN &&
         leafId &&
-        sendPaneCommandToLayoutOwner(
+        sendLayoutCommandToOwner(
           worktreeId,
           { type: 'renamePane', tabId, leafId, title },
           { apply: showTitle, asToday: showTitle }

@@ -8,10 +8,14 @@ name: Windows packaged orcad serve switch E2E
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - 'src/main/daemon/**'
       - '!src/main/daemon/**/*.test.ts'
+      - '!src/main/daemon/serialize-grid-roundtrip.ts'
+      - '!src/main/daemon/mock-descendant-sweep.ts'
+      - '!src/main/daemon/daemon-host-relocation.test-fixture.ts'
+      - '!src/main/daemon/daemon-endpoint-reachability-test-harness.ts'
       # D7 packages production entries; the unit jobs own these test roots.
       - 'src/main/orcad/**'
       - '!src/main/orcad/**/*.test.ts'

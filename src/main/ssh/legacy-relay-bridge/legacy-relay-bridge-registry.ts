@@ -13,9 +13,12 @@ import type { SshConnection } from '../ssh-connection'
 import { waitForSentinel } from '../ssh-relay-sentinel'
 import { probeRelayEndpointIncumbent } from '../ssh-relay-endpoint-incumbent'
 import { isWindowsRemoteHost } from '../ssh-remote-platform'
+import type { OrcaRuntimeService } from '../../runtime/orca-runtime'
 import { LegacyRelayClient } from './legacy-relay-client'
+import { createLegacyRelayCliServer } from './legacy-relay-cli-server'
 import { listLegacyRelayEndpoints, type LegacyRelayEndpoint } from './legacy-relay-endpoints'
 import { LegacyRelayTargetBridge } from './legacy-relay-target-bridge'
+import { LegacyRelayHiddenOutput } from './legacy-relay-hidden-output'
 import { bridgeableLeasesByRelayId, isBridgeableLease } from './legacy-relay-bridge-leases'
 
 /** How long a connect waits for the first look at its relays before publishing the host. */
@@ -31,11 +34,19 @@ export type LegacyRelayBridgeHost = {
   connection: (targetId: string) => SshConnection | null
   onPanesChanged: (panes: LegacyRelayBridgedPane[]) => void
   onData: (ptyId: string, data: string) => void
+  onReplay: (ptyId: string, replay: string) => void
   onExit: (ptyId: string, code: number) => void
   report: (targetId: string, phase: 'connected' | 'terminal_exited', terminals: number) => void
+  /** Absent: relay-era `orca` commands are refused, as before this host served them. */
+  remoteCli?: {
+    runtime: () => OrcaRuntimeService | null
+    /** The per-host "Allow this host's orca CLI to control Orca" switch. */
+    allowed: (targetId: string) => boolean
+  }
 }
 
 let host: LegacyRelayBridgeHost | null = null
+let hiddenOutput: LegacyRelayHiddenOutput | null = null
 const bridges = new Map<string, LegacyRelayTargetBridge>()
 /**
  * Panes a hung-up bridge served, held `unverifiable` until the target's next bridge lists its own
@@ -50,6 +61,13 @@ export function installLegacyRelayBridge(next: LegacyRelayBridgeHost | null): vo
   bridges.clear()
   heldPanes.clear()
   host = next
+  hiddenOutput = next
+    ? new LegacyRelayHiddenOutput({
+        onData: next.onData,
+        onReplay: next.onReplay,
+        reread: rereadLegacyRelayScreen
+      })
+    : null
 }
 
 export function terminalsBucket(count: number): TerminalsBucket {
@@ -83,7 +101,16 @@ function bridgeFor(targetId: string): LegacyRelayTargetBridge | null {
     }
     return conn
   }
-  const bridge = new LegacyRelayTargetBridge({
+  const remoteCli = installed.remoteCli
+  const cliServer = remoteCli
+    ? createLegacyRelayCliServer({
+        targetId,
+        runtime: remoteCli.runtime,
+        remoteCliControl: () => remoteCli.allowed(targetId),
+        livePane: (paneKey) => bridge.livePaneForKey(paneKey)
+      })
+    : undefined
+  const bridge: LegacyRelayTargetBridge = new LegacyRelayTargetBridge({
     targetId,
     leases: () => installed.leases(targetId),
     retireLease: (relayPtyId) => installed.retireLease(targetId, relayPtyId),
@@ -95,6 +122,7 @@ function bridgeFor(targetId: string): LegacyRelayTargetBridge | null {
       LegacyRelayClient.open({
         clientInstanceId,
         resume,
+        cliServer,
         openTransport: async () =>
           waitForSentinel(
             await connection().exec(endpoint.connectCommand ?? '', {
@@ -110,8 +138,11 @@ function bridgeFor(targetId: string): LegacyRelayTargetBridge | null {
       }
       installed.onPanesChanged(legacyRelayBridgedPanes())
     },
-    onData: installed.onData,
-    onExit: installed.onExit,
+    onData: (ptyId, data) => hiddenOutput?.onData(ptyId, data),
+    onExit: (ptyId, code) => {
+      hiddenOutput?.forget(ptyId)
+      installed.onExit(ptyId, code)
+    },
     onTerminalExited: () => installed.report(targetId, 'terminal_exited', 0)
   })
   bridges.set(targetId, bridge)
@@ -216,7 +247,19 @@ export async function attachLegacyRelayPane(ptyId: string): Promise<LegacyRelayB
     void bridge.refresh()
     return { status: 'unverifiable' }
   }
-  return bridge.attach(ptyId)
+  return bridge.attach(ptyId, () => hiddenOutput?.screenSent(ptyId))
+}
+
+/** Re-reads a live pane's screen through the same attach a reconnect uses. */
+async function rereadLegacyRelayScreen(
+  ptyId: string,
+  atSnapshot: (replay: string) => void
+): Promise<void> {
+  const bridge = bridgeForPty(ptyId)
+  if ((await bridge?.attach(ptyId, atSnapshot))?.status === 'attached') {
+    // The attach counted a viewer; this re-read is not one.
+    bridge?.detach(ptyId)
+  }
 }
 
 async function waitForConnection(targetId: string): Promise<boolean> {
@@ -241,6 +284,10 @@ export function writeLegacyRelayPane(ptyId: string, data: string): void {
 
 export function resizeLegacyRelayPane(ptyId: string, cols: number, rows: number): void {
   bridgeForPty(ptyId)?.resize(ptyId, cols, rows)
+}
+
+export function setLegacyRelayPaneOutputPaused(ptyId: string, paused: boolean): void {
+  hiddenOutput?.setPaused(ptyId, paused)
 }
 
 export function detachLegacyRelayPane(ptyId: string): void {

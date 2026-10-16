@@ -20,7 +20,8 @@ import { capturePendingTerminalPaneClose } from './terminal-pane-close-admission
 import { commitTerminalSurfaceClose } from '@/store/terminals/terminal-surface-close-intent'
 import { noteAgentLaunchPaneClosedByUser } from '@/lib/agent-launch-pane-closes'
 import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../shared/layout-owner-switch'
-import { sendPaneCommandToLayoutOwner } from './terminal-pane-layout-owner-commands'
+import { sendLayoutCommandToOwner } from '@/runtime/layout-owner-command'
+import { closeAfterLastPaneRefusal } from './layout-owner-last-pane-refusal'
 
 export function useTerminalPaneCloseActions(controller: TerminalPaneBindingController) {
   const confirmedCloseRef = useRef<(() => void) | null>(null)
@@ -118,15 +119,15 @@ export function useTerminalPaneCloseActions(controller: TerminalPaneBindingContr
       if (
         ORCA_LAYOUT_OWNER_IS_MAIN &&
         leafId &&
-        sendPaneCommandToLayoutOwner(
+        sendLayoutCommandToOwner(
           worktreeId,
           { type: 'closePane', tabId, leafId },
           {
             apply: () => closePaneLocally(paneId, leafId),
             asToday: () => closePaneLocally(paneId),
-            // An earlier close in flight took the sibling: once it lands here too, the tab closes.
             refused: (code) =>
-              code === 'last_pane' && managerRef.current?.getPanes().length === 1 && onCloseTab()
+              code === 'last_pane' &&
+              closeAfterLastPaneRefusal(managerRef.current, onCloseTab, closePaneLocally, paneId)
           }
         )
       ) {
