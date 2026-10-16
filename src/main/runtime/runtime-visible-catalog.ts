@@ -46,18 +46,38 @@ export function runtimeVisibleFolderWorkspaces(store: CatalogSource | null): Fol
   return store ? visibleFolderWorkspaces(catalogStore(store)) : []
 }
 
-/** Repos in the store that clients must not see; empty in the common case of nothing hidden. */
-export function runtimeHiddenRepoIds(store: CatalogSource | null): ReadonlySet<string> {
+/** Repo rows clients must not see, by (repo id, host): the same id often lives on another host. */
+export type RuntimeHiddenRepos = {
+  readonly size: number
+  has(repoId: string, hostId: string | null | undefined): boolean
+}
+
+const NO_HIDDEN_REPOS: RuntimeHiddenRepos = { size: 0, has: () => false }
+
+function repoHostKey(repoId: string, hostId: string): string {
+  return `${hostId}\0${repoId}`
+}
+
+/**
+ * Empty in the common case of nothing hidden. A row without a host is this machine's, as a repo
+ * row with no host fields is; a WSL move hides the local row while the host's same-id row stays.
+ */
+export function runtimeHiddenRepos(store: CatalogSource | null): RuntimeHiddenRepos {
   if (!store) {
-    return new Set()
+    return NO_HIDDEN_REPOS
   }
   const all = store.getRepos()
   const visible = runtimeVisibleRepos(store)
   if (visible.length === all.length) {
-    return new Set()
+    return NO_HIDDEN_REPOS
   }
-  const visibleIds = new Set(visible.map((repo) => repo.id))
-  return new Set(all.filter((repo) => !visibleIds.has(repo.id)).map((repo) => repo.id))
+  const keyOf = (repo: Repo): string => repoHostKey(repo.id, getRepoExecutionHostId(repo))
+  const visibleKeys = new Set(visible.map(keyOf))
+  const hidden = new Set(all.map(keyOf).filter((key) => !visibleKeys.has(key)))
+  return {
+    size: hidden.size,
+    has: (repoId, hostId) => hidden.has(repoHostKey(repoId, hostId || LOCAL_EXECUTION_HOST_ID))
+  }
 }
 
 function folderHostId(folder: FolderWorkspace): ExecutionHostId | null {
@@ -72,7 +92,7 @@ function folderHostId(folder: FolderWorkspace): ExecutionHostId | null {
  * that would send a user or agent to list a host whose rows are hidden on purpose.
  */
 export function runtimeHiddenHostIds(store: CatalogSource | null): ReadonlySet<ExecutionHostId> {
-  const hiddenRepos = runtimeHiddenRepoIds(store)
+  const hiddenRepos = runtimeHiddenRepos(store)
   if (!store) {
     return new Set()
   }
@@ -92,7 +112,8 @@ export function runtimeHiddenHostIds(store: CatalogSource | null): ReadonlySet<E
     }
   }
   for (const repo of store.getRepos()) {
-    note(getRepoExecutionHostId(repo), hiddenRepos.has(repo.id))
+    const hostId = getRepoExecutionHostId(repo)
+    note(hostId, hiddenRepos.has(repo.id, hostId))
   }
   for (const folder of folders) {
     note(folderHostId(folder), !visibleFolderIds.has(folder.id))

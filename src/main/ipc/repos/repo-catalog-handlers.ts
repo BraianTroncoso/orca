@@ -14,6 +14,7 @@ import {
   assertWslMoveReposWritable,
   isWslMoveSourceHost
 } from '../../persistence/moving-wsl-projects/wsl-move-scope-guard'
+import { listWslMovedProjects } from '../../persistence/moving-wsl-projects/wsl-moved-projects'
 
 export function registerRepoCatalogHandlers(mainWindow: BrowserWindow, store: Store): void {
   // Why one shared reference: enrichment dedupes coalesced callers by callback identity, so a fresh
@@ -26,6 +27,11 @@ export function registerRepoCatalogHandlers(mainWindow: BrowserWindow, store: St
     enrichRepoGitUsernames(store, { onChanged: broadcastReposChanged })
     return visibleRepos(store)
   })
+
+  // The local rows `repos:list` hides once their WSL host owns them; read-only, for their chats.
+  ipcMain.handle('repos:listWslMoved', () =>
+    listWslMovedProjects(store.getRepos(), store.getFolderWorkspaces())
+  )
 
   ipcMain.handle('projects:list', () => {
     enrichMissingRepoGitRemoteIdentities(store, { onChanged: broadcastReposChanged })

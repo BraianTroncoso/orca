@@ -11,7 +11,7 @@ vi.mock('../ssh/orcad-retained-source', () => ({
   visibleFolderWorkspaces: vi.fn(() => [])
 }))
 
-const { runtimeHiddenHostIds, runtimeHiddenRepoIds, runtimeVisibleRepos } =
+const { runtimeHiddenHostIds, runtimeHiddenRepos, runtimeVisibleRepos } =
   await import('./runtime-visible-catalog')
 
 const sshTarget = { id: 'target-1', label: 'dev', host: 'dev', port: 22, username: 'dev' }
@@ -34,7 +34,10 @@ describe('runtime visible catalog', () => {
     visibleRepos.mockImplementation((store) => store.getRepos().filter((r) => r.id !== 'retained'))
     const store = storeWith(all, true)
     expect(runtimeVisibleRepos(store).map((r) => r.id)).toEqual(['local'])
-    expect([...runtimeHiddenRepoIds(store)]).toEqual(['retained'])
+    const hidden = runtimeHiddenRepos(store)
+    expect(hidden.size).toBe(1)
+    expect(hidden.has('retained', 'local')).toBe(true)
+    expect(hidden.has('local', 'local')).toBe(false)
   })
 
   it('treats a store with no SSH targets (headless orcad) as hiding nothing of its own', () => {
@@ -44,12 +47,35 @@ describe('runtime visible catalog', () => {
     })
     const store = storeWith([repo('a')], false)
     expect(runtimeVisibleRepos(store)).toHaveLength(1)
-    expect(runtimeHiddenRepoIds(store).size).toBe(0)
+    expect(runtimeHiddenRepos(store).size).toBe(0)
   })
 
   it('lists nothing without a store', () => {
     expect(runtimeVisibleRepos(null)).toEqual([])
-    expect(runtimeHiddenRepoIds(null).size).toBe(0)
+    expect(runtimeHiddenRepos(null).size).toBe(0)
+  })
+
+  it('hides a moved local row by host while the WSL host row with the same id stays listed', () => {
+    const local = repo('moved')
+    const onHost: Repo = { ...repo('moved'), executionHostId: 'runtime:wsl-ubuntu' }
+    visibleRepos.mockImplementation((store) => store.getRepos().filter((r) => r !== local))
+    const hidden = runtimeHiddenRepos(storeWith([local, onHost], true))
+    expect(hidden.size).toBe(1)
+    expect(hidden.has('moved', 'local')).toBe(true)
+    // A worktree row with no host is this machine's.
+    expect(hidden.has('moved', undefined)).toBe(true)
+    expect(hidden.has('moved', 'runtime:wsl-ubuntu')).toBe(false)
+  })
+
+  it('hides a retained SSH source row by host while a same-id row elsewhere stays listed', () => {
+    const retained = repo('shared', 'target-1')
+    const local = repo('shared')
+    visibleRepos.mockImplementation((store) => store.getRepos().filter((r) => r !== retained))
+    const store = storeWith([retained, local], true)
+    const hidden = runtimeHiddenRepos(store)
+    expect(hidden.has('shared', 'ssh:target-1')).toBe(true)
+    expect(hidden.has('shared', 'local')).toBe(false)
+    expect([...runtimeHiddenHostIds(store)]).toEqual(['ssh:target-1'])
   })
 
   it('names a host known only through hidden rows, but never this machine', () => {
