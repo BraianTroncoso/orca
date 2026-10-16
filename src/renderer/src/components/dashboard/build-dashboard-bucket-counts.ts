@@ -6,7 +6,11 @@ import {
   type DashboardWorkspaceState
 } from './dashboard-snapshot-workspaces'
 import { selectDashboardOrchestration } from './dashboard-orchestration-selection'
-import { dashboardRowBucketProjection, type AgentRowUnreadState } from './dashboard-row-bucket'
+import {
+  dashboardRowBucketProjection,
+  readAgentRowTurnRecords,
+  type AgentRowUnreadState
+} from './dashboard-row-bucket'
 import type { DashboardAgentRowWithLineage } from './agent-row-lineage'
 import { EMPTY_WORKTREE_AGENT_ORCHESTRATION } from '../sidebar/worktree-agent-orchestration-batch'
 import {
@@ -125,6 +129,7 @@ function tallyWorktreeRows(
   ) {
     return memo.tally
   }
+  const turnRecords = readAgentRowTurnRecords(state)
   const tally = { attention: 0, working: 0, done: 0, idle: 0 } satisfies Record<
     DashboardBucket,
     number
@@ -133,7 +138,7 @@ function tallyWorktreeRows(
     if (row.rowSource === 'subagent') {
       continue
     }
-    tally[dashboardRowBucketProjection(row, state).bucket] += 1
+    tally[dashboardRowBucketProjection(row, turnRecords).bucket] += 1
   }
   cache?.tallyByWorktree.set(worktreeId, {
     rows,

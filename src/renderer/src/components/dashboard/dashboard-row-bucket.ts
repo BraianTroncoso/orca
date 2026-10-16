@@ -31,21 +31,19 @@ export type AgentRowUnreadState = {
 }
 
 /**
- * The one unread (bold) rule for an agent row, on every surface that draws one.
+ * The records behind the one unread (bold) rule for an agent row, on every surface that draws one:
+ * `isAgentSubjectUnread(records, row.paneKey)`.
  *
  * Why the store's turn records, not the row: auto-acknowledgement clears exactly these, so a row
  * is bold only while viewing or clicking it can clear it. Rows built from a terminal title, a
  * subagent or a migration block have no record and are never unread.
  */
-export function isAgentRowUnread(state: AgentRowUnreadState, paneKey: string): boolean {
-  return isAgentSubjectUnread(
-    {
-      liveTurns: state.agentStatusByPaneKey,
-      retainedTurns: state.retainedAgentsByPaneKey,
-      acknowledgedTurnStartedAt: state.acknowledgedAgentsByPaneKey
-    },
-    paneKey
-  )
+export function readAgentRowTurnRecords(state: AgentRowUnreadState): AgentAttentionTurnRecords {
+  return {
+    liveTurns: state.agentStatusByPaneKey,
+    retainedTurns: state.retainedAgentsByPaneKey,
+    acknowledgedTurnStartedAt: state.acknowledgedAgentsByPaneKey
+  }
 }
 
 export type DashboardRowBucketProjection = {
@@ -59,7 +57,7 @@ export type DashboardRowBucketProjection = {
 /** Derive the shared dashboard presentation state for one agent row. */
 export function dashboardRowBucketProjection(
   row: Pick<DashboardAgentRow, 'paneKey' | 'entry' | 'state' | 'startedAt'>,
-  state: AgentRowUnreadState
+  turnRecords: AgentAttentionTurnRecords
 ): DashboardRowBucketProjection {
   const isTitleDerived = row.startedAt === 0
   const dotState = dashboardCardDotState(row.state)
@@ -67,7 +65,7 @@ export function dashboardRowBucketProjection(
     row.state === 'working' && row.entry.workingMode === 'monitoring'
       ? row.entry.workingMode
       : undefined
-  const unseen = isAgentRowUnread(state, row.paneKey)
+  const unseen = isAgentSubjectUnread(turnRecords, row.paneKey)
   const bucket = dashboardBucketForDotState(
     dashboardCardDisplayState({ dotState, workingMode, unseen })
   )

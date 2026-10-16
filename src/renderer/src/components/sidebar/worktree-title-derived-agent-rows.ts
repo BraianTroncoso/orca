@@ -233,7 +233,8 @@ function buildTitleDerivedAgentRow(args: {
     state: rowState,
     // Load-bearing zero, not a placeholder: dashboard readers treat `startedAt === 0` as
     // "title-derived" and hide its synthetic prompt text. The `args.now` stamps on `entry` above
-    // never reach unread: `isAgentRowUnread` reads the store's turn records, and this row has none.
+    // never reach unread, which reads the store's turn records (`readAgentRowTurnRecords`);
+    // this row has none.
     // Dashboard bucket caches key their invalidation on the freshness boundary alone, so a bucket
     // that read these stamps would serve stale counts with no test failing at the change.
     startedAt: 0
