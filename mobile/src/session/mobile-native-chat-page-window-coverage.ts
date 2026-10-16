@@ -34,7 +34,7 @@ export function coverMobileNativeChatWindow(
         top -= known(start)!
       }
     } else {
-      for (top = bottom, start = end; start < n - 1 && top + height(start) <= scrollTop; ) {
+      for (top = bottom, start = end; start < n - 1 && top + height(start) <= scrollTop;) {
         top += height(start)
         start += 1
       }

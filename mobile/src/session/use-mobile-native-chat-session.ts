@@ -243,79 +243,82 @@ export function useMobileNativeChatSession(args: {
     }
   }, [client, agent, sessionId, transcriptPath, identity, setList, supersede])
 
-  const loadEarlier = useCallback((settled?: () => Promise<void>) => {
-    if (!client || !agent || !sessionId || !hasMore) {
-      return
-    }
-    // Capture the session this page belongs to; a swap underneath us must not
-    // apply this read's result onto the new session (mirrors desktop's guard).
-    const requestSessionId = sessionId
-    loadOlderPages(async ({ timeoutMs, isCurrent }) => {
-      const page = nextPageWindow(limitRef.current, mergerRef.current.list.length)
-      if (!page) {
-        setHasMore(false)
-        return 'end'
+  const loadEarlier = useCallback(
+    (settled?: () => Promise<void>) => {
+      if (!client || !agent || !sessionId || !hasMore) {
+        return
       }
-      const { nextLimit, pageLimit } = page
-      const beforeOffset = beforeOffsetRef.current
-      const response = await nativeChatSessionPageRead.request(
-        client,
-        {
-          agent,
-          sessionId,
-          limit: beforeOffset === null ? nextLimit : pageLimit,
-          ...(beforeOffset === null ? {} : { beforeOffset }),
-          ...(transcriptPath ? { transcriptPath } : {})
-        },
-        { timeoutMs, budgetSpansConnect: true }
-      )
-      const accepted = nativeChatSessionPageRead.interpret(response)
-      if (!accepted.accepted) {
-        return 'failed'
-      }
-      // The read is `z.unknown()` because the reply is a union, so an accepted success can still
-      // carry no result at all, or null; `'error' in` throws on either.
-      const payload = accepted.value
-      if (payload === null || typeof payload !== 'object') {
-        return 'failed'
-      }
-      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: main cast this payload unread; the reader hands back the same result.
-      const result = payload as ReadSessionResult
-      if ('error' in result) {
-        return 'failed'
-      }
-      // The page lands once the reader stops scrolling: rows growing above them mid-fling would move
-      // what they read, and iOS stops the fling on the write that would hold it.
-      if (settled) {
-        await settled()
-      }
-      // Lands only on the window and cursor it was asked from; otherwise the window it
-      // read against is gone, and the reader pages again from the new one.
-      if (
-        !isCurrent() ||
-        sessionIdRef.current !== requestSessionId ||
-        beforeOffsetRef.current !== beforeOffset
-      ) {
-        return 'end'
-      }
-      limitRef.current = nextLimit
-      let more: boolean
-      if (beforeOffset !== null && result.beforeOffset != null) {
-        beforeOffsetRef.current = result.beforeOffset
-        setList([...result.messages, ...mergerRef.current.list])
-        more = nextLimit < MAX_MESSAGES && (result.hasMore ?? result.messages.length >= pageLimit)
-      } else {
-        // Older runtimes ignore the cursor and return the growing tail; rows that streamed in while
-        // it waited stay.
-        const live = mergerRef.current.list
-        const after = live.findIndex((message) => message.id === result.messages.at(-1)?.id)
-        setList(after === -1 ? result.messages : [...result.messages, ...live.slice(after + 1)])
-        more = result.messages.length >= nextLimit
-      }
-      setHasMore(more)
-      return more ? 'drew' : 'end'
-    })
-  }, [client, agent, sessionId, transcriptPath, hasMore, setList, loadOlderPages])
+      // Capture the session this page belongs to; a swap underneath us must not
+      // apply this read's result onto the new session (mirrors desktop's guard).
+      const requestSessionId = sessionId
+      loadOlderPages(async ({ timeoutMs, isCurrent }) => {
+        const page = nextPageWindow(limitRef.current, mergerRef.current.list.length)
+        if (!page) {
+          setHasMore(false)
+          return 'end'
+        }
+        const { nextLimit, pageLimit } = page
+        const beforeOffset = beforeOffsetRef.current
+        const response = await nativeChatSessionPageRead.request(
+          client,
+          {
+            agent,
+            sessionId,
+            limit: beforeOffset === null ? nextLimit : pageLimit,
+            ...(beforeOffset === null ? {} : { beforeOffset }),
+            ...(transcriptPath ? { transcriptPath } : {})
+          },
+          { timeoutMs, budgetSpansConnect: true }
+        )
+        const accepted = nativeChatSessionPageRead.interpret(response)
+        if (!accepted.accepted) {
+          return 'failed'
+        }
+        // The read is `z.unknown()` because the reply is a union, so an accepted success can still
+        // carry no result at all, or null; `'error' in` throws on either.
+        const payload = accepted.value
+        if (payload === null || typeof payload !== 'object') {
+          return 'failed'
+        }
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: main cast this payload unread; the reader hands back the same result.
+        const result = payload as ReadSessionResult
+        if ('error' in result) {
+          return 'failed'
+        }
+        // The page lands once the reader stops scrolling: rows growing above them mid-fling would move
+        // what they read, and iOS stops the fling on the write that would hold it.
+        if (settled) {
+          await settled()
+        }
+        // Lands only on the window and cursor it was asked from; otherwise the window it
+        // read against is gone, and the reader pages again from the new one.
+        if (
+          !isCurrent() ||
+          sessionIdRef.current !== requestSessionId ||
+          beforeOffsetRef.current !== beforeOffset
+        ) {
+          return 'end'
+        }
+        limitRef.current = nextLimit
+        let more: boolean
+        if (beforeOffset !== null && result.beforeOffset != null) {
+          beforeOffsetRef.current = result.beforeOffset
+          setList([...result.messages, ...mergerRef.current.list])
+          more = nextLimit < MAX_MESSAGES && (result.hasMore ?? result.messages.length >= pageLimit)
+        } else {
+          // Older runtimes ignore the cursor and return the growing tail; rows that streamed in while
+          // it waited stay.
+          const live = mergerRef.current.list
+          const after = live.findIndex((message) => message.id === result.messages.at(-1)?.id)
+          setList(after === -1 ? result.messages : [...result.messages, ...live.slice(after + 1)])
+          more = result.messages.length >= nextLimit
+        }
+        setHasMore(more)
+        return more ? 'drew' : 'end'
+      })
+    },
+    [client, agent, sessionId, transcriptPath, hasMore, setList, loadOlderPages]
+  )
 
   // Held for any unsettled read, not just an in-flight one: a stream error or a
   // dropped client would otherwise trade the conversation for an error card.

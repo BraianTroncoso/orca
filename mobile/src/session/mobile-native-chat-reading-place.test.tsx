@@ -156,7 +156,9 @@ function Chat(props: {
       listRef: props.listRef
     }),
     h('div', { testID: 'header' }, h('span', null, 'Load earlier')),
-    folded.map((item) => h(Row, { key: keys.keyOf(item), message: item, rowKey: keys.keyOf(item) })),
+    folded.map((item) =>
+      h(Row, { key: keys.keyOf(item), message: item, rowKey: keys.keyOf(item) })
+    ),
     props.live ? h('span', null, 'Working') : null
   )
 }

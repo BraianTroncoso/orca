@@ -62,7 +62,7 @@ export class MobileNativeChatPageHeights {
     slack: number
   ): { first: number; above: number; mid: number; bottom: number } {
     let [first, above, mid, bottom] = [m0, slack, 0, 0]
-    for (let px = this.px(keys[first - 1]); first > 0 && px !== undefined; ) {
+    for (let px = this.px(keys[first - 1]); first > 0 && px !== undefined;) {
       above += px
       first -= 1
       px = this.px(keys[first - 1])
