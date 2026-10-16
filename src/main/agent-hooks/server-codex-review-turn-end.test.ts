@@ -101,7 +101,10 @@ describe('Codex review turn completion', () => {
     })
   })
 
-  it('settles a failed turn without Stop after a child finished in its rollout', async () => {
+  it.each([
+    ['in an earlier poll', true],
+    ['in the same poll', false]
+  ])('settles a failed turn without Stop after a child finished %s', async (_, separatePolls) => {
     directory = mkdtempSync(join(tmpdir(), 'codex-failed-turn-'))
     const day = join(directory, '2026', '10', '16')
     mkdirSync(day, { recursive: true })
@@ -138,9 +141,10 @@ describe('Codex review turn completion', () => {
     writeFileSync(childPath, event({ type: 'task_started', turn_id: 'child-turn' }))
     expect((await hook('PostToolUse', { tool_name: 'spawn_agent' })).status).toBe(204)
 
-    // The child's end is published as its own status update before the root turn fails.
     appendFileSync(childPath, event({ type: 'task_complete', turn_id: 'child-turn' }))
-    await new Promise((resolve) => setTimeout(resolve, 1_200))
+    if (separatePolls) {
+      await new Promise((resolve) => setTimeout(resolve, 1_200))
+    }
     appendFileSync(
       rootPath,
       event({ type: 'task_complete', turn_id: 'root-turn', error: { message: 'usage limit' } })

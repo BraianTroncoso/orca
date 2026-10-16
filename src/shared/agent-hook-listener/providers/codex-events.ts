@@ -278,7 +278,13 @@ export function normalizeCodexEvent(
     model:
       normalizeOptionalField(hookPayload['model'], AGENT_MODEL_MAX_LENGTH) ??
       (eventName === 'SessionStart' ? undefined : previousLead?.model),
-    turnId: turnId ?? (eventName === 'UserPromptSubmit' ? null : undefined)
+    // Why: only compaction restarts a session inside the running turn; any other start or prompt begins a new one.
+    turnId:
+      turnId ??
+      (eventName === 'UserPromptSubmit' ||
+      (eventName === 'SessionStart' && readString(hookPayload, 'source') !== 'compact')
+        ? null
+        : undefined)
   })
   return buildCodexStatusPayload(state, eventName, promptText, paneKey, hookPayload, {
     ...resolveCodexPaneStatus(state, paneKey, record),

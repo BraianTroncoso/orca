@@ -4,6 +4,7 @@ import type { HookListenerState } from '../listener-state'
 import { buildCodexChildDrivenStatusPayload } from './codex-events'
 import {
   getOrCreateCodexSubagentRoster,
+  hasCodexTranscriptSubagents,
   markCodexLeadTurnInterrupted,
   settleCodexLeadTurnFromTranscript
 } from './codex-state'
@@ -31,6 +32,11 @@ export function pollCodexTranscriptStatus<T extends AgentHookEventPayload>(
   }
   const completed =
     beforeLead !== 'done' && state.codexLeadStateByPaneKey.get(original.paneKey)?.state === 'done'
+  if (completed && !hasCodexTranscriptSubagents(state, original.paneKey)) {
+    // Why: the rollout's turn end stands in for the missing Stop, so it retires hook-only children
+    // the same way; cleared, not deleted, so a reconcile cannot re-seed them from the last row.
+    getOrCreateCodexSubagentRoster(state, original.paneKey).clear()
+  }
   if (!changed && !interrupted && !completed) {
     return original
   }

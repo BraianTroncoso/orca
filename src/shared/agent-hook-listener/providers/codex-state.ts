@@ -85,10 +85,6 @@ export function settleCodexLeadTurnFromTranscript(state: HookListenerState, pane
   if (!end) {
     return
   }
-  if (!hasCodexTranscriptSubagents(state, paneKey)) {
-    // Why: the rollout's turn end stands in for the missing Stop, so it retires hook-only children the same way.
-    state.codexSubagentRosterByPaneKey.delete(paneKey)
-  }
   setCodexMainAgentTurnState(state, paneKey, {
     state: 'done',
     ...(end === 'failed' ? { outcome: 'failure' as const } : {}),
@@ -269,6 +265,10 @@ export function reconcileRemoteCodexState(
   }
 
   if (!eventName && !agentId && payload.mainAgent && payload.mainAgent.state !== 'blocked') {
+    if (payload.mainAgent.state === 'done' && !payload.subagents) {
+      // Why: a host-settled turn that reports no children has none left, even ones this cache saw start.
+      roster.clear()
+    }
     setCodexMainAgentTurnState(state, paneKey, {
       ...payload.mainAgent,
       state: payload.mainAgent.state,
