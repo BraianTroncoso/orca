@@ -99,7 +99,7 @@ for (const runtime of ['native', 'wsl'] as const) {
           const manager = tab ? window.__paneManagers?.get(tab) : undefined
           const term = manager?.getActivePane()?.terminal as any
           const core = term._core
-          const addon = core._addonManager._addons.map((a: any) => a.instance).find((a: any) => a._storage)
+          const addon = term._addonManager._addons.map((a: any) => a.instance).find((a: any) => a._storage)
           const storage = addon._storage
           const renderer = storage._renderer
           const layers = [...renderer._layers.entries()].map(([k, ctx]: any) => ({ k, w: ctx.canvas.width, h: ctx.canvas.height, cssW: ctx.canvas.style.width, inDom: ctx.canvas.isConnected }))
