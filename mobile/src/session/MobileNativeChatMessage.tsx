@@ -317,6 +317,7 @@ function MobileNativeChatMessageImpl({
               // Why: a global toggle intentionally resets all per-run/per-line
               // overrides in one remount, avoiding an effect-driven second render.
               key={`${toolsExpanded ? 'expanded' : 'collapsed'}:${turnExpanded ? 'turn' : 'flat'}`}
+              disclosureId={`${rowKey ?? message.id}:${toolsExpanded}:${turnExpanded}`}
               blocks={tools}
               defaultExpanded={turnExpanded || toolsExpanded}
               expandChildren={turnExpanded ? false : toolsExpanded}

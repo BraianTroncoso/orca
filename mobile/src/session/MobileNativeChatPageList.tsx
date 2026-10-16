@@ -2,6 +2,7 @@ import {
   useCallback,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   type ReactElement,
   type Ref
@@ -15,6 +16,10 @@ import {
   type ViewStyle
 } from 'react-native'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
+import {
+  MobileNativeChatKeptContext,
+  newMobileNativeChatKept
+} from './mobile-native-chat-kept-disclosures'
 import type { MobileNativeChatRowKeys } from './mobile-native-chat-row-keys'
 import { styles } from './mobile-native-chat-view-styles'
 import { MobileNativeChatPageScroll } from './MobileNativeChatPageScroll'
@@ -96,6 +101,8 @@ export function MobileNativeChatPageList({
     }
   }, [shown, pin])
 
+  // Rows unmount once scrolled past; what the reader opened in this chat outlives them.
+  const kept = useMemo(() => newMobileNativeChatKept(), [rowKeys.scope])
   const drawRow = (item: NativeChatMessage, index: number) => {
     const key = rowKeys.keyOf(item)
     return (
@@ -119,13 +126,13 @@ export function MobileNativeChatPageList({
       {rows.length === 0 ? (
         emptyStateView
       ) : (
-        <View>
+        <MobileNativeChatKeptContext.Provider value={kept}>
           <View style={[pageList.spacer, { height: view.above }]} />
           {rows.slice(view.m0, view.m1).map((item, at) => drawRow(item, view.m0 + at))}
           <View style={[pageList.spacer, { height: view.mid }]} />
           {rows.slice(view.start, view.end).map((item, at) => drawRow(item, view.start + at))}
           <View style={[pageList.spacer, { height: view.bottom }]} />
-        </View>
+        </MobileNativeChatKeptContext.Provider>
       )}
       {footer}
     </MobileNativeChatPageScroll>
