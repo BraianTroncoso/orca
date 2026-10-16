@@ -117,6 +117,16 @@ export type LayoutCommand =
     })
   | (On & { type: 'promotePreviewTab'; tabId: string })
   | (On & {
+      type: 'moveTabToWorkspace'
+      /** The workspace that owns the tabs' file, as the window resolved it; same partition. */
+      toWorkspace: string
+      /** In the order they join the group's end; ids change when they name the old owner. */
+      tabs: { tabId: string; newTabId: string; newEntityId: string }[]
+      groupId: string
+      /** The moved edit-mode file's record in its new workspace. */
+      file?: LayoutEditorFile
+    })
+  | (On & {
       type: 'openBrowserTab'
       profileId?: string | null
       sessionPartition?: string | null
@@ -213,8 +223,13 @@ export type LayoutApplyOutcome =
   | { ok: true; result: LayoutCommandResult }
   | { ok: false; code: LayoutRefusalCode }
 
-/** `layout.apply`'s reply. `host_not_owned`: a paired server owns that workspace's layout. */
-export type LayoutApplyReply = LayoutApplyOutcome | { ok: false; code: 'host_not_owned' }
+/**
+ * `layout.apply`'s reply. `host_not_owned`: a paired server owns that workspace's layout.
+ * `other_partition`: a move's two workspaces are in different host partitions.
+ */
+export type LayoutApplyReply =
+  | LayoutApplyOutcome
+  | { ok: false; code: 'host_not_owned' | 'other_partition' }
 
 export type LayoutContext = {
   mintId: () => string

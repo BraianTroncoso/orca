@@ -270,6 +270,25 @@ describe('layout.apply', () => {
     ).toEqual({ command: { type: 'closeTabs', workspace: WORKTREE, tabIds: ['e1'] } })
   })
 
+  it('accepts an editor tab move to the workspace the window resolved, naming its new ids', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const parse = (command: Record<string, unknown>) => apply?.params?.safeParse({ command })
+    const move = {
+      type: 'moveTabToWorkspace',
+      workspace: WORKTREE,
+      toWorkspace: 'repo-1::/work/two',
+      tabs: [{ tabId: 'e1', newTabId: 'e1', newEntityId: 'editor:two:/work/two/a.ts' }],
+      groupId: 'g2',
+      file: { filePath: '/work/two/a.ts', relativePath: 'a.ts', language: 'typescript' }
+    }
+
+    expect(parse(move)?.success).toBe(true)
+    expect(parse({ ...move, file: undefined })?.success).toBe(true)
+    expect(parse({ ...move, tabs: [] })?.success).toBe(false)
+    expect(parse({ ...move, groupId: undefined })?.success).toBe(false)
+    expect(parse({ ...move, toWorkspace: '' })?.success).toBe(false)
+  })
+
   it('opens an editor tab in the workspace’s routed partition', async () => {
     const { runtime, applyLayoutCommand } = runtimeHolding('ssh:target-1')
     const open = {
@@ -283,6 +302,42 @@ describe('layout.apply', () => {
     await runtime.applyLayoutCommand(open)
 
     expect(applyLayoutCommand).toHaveBeenCalledWith(open, ['local'])
+  })
+
+  it('accepts a sleep of one tab’s panes and a wake of exactly one pane', async () => {
+    const apply = (await registeredMethods(true)).find((method) => method.name === 'layout.apply')
+    const parse = (command: Record<string, unknown>) => apply?.params?.safeParse({ command })
+    const paneKey = 'tab-1:11111111-1111-4111-8111-111111111111'
+    const otherTabPane = 'tab-2:22222222-2222-4222-8222-222222222222'
+    const record = {
+      paneKey,
+      worktreeId: WORKTREE,
+      agent: 'codex',
+      providerSession: { key: 'session_id', id: 'session-1' },
+      prompt: '',
+      state: 'done',
+      capturedAt: 1,
+      updatedAt: 1
+    }
+    const sleep = { type: 'sleep', workspace: WORKTREE, tabId: 'tab-1' }
+    const wake = { type: 'wake', workspace: WORKTREE, tabId: 'tab-1' }
+
+    expect(parse({ ...sleep, paneKeys: [paneKey], records: [record] })?.success).toBe(true)
+    // Never the whole workspace, never past the tab, never a record for another pane or workspace.
+    expect(parse({ ...sleep, records: [record] })?.success).toBe(false)
+    expect(parse({ ...sleep, paneKeys: [otherTabPane], records: [] })?.success).toBe(false)
+    expect(
+      parse({ ...sleep, paneKeys: [paneKey], records: [{ ...record, paneKey: otherTabPane }] })
+        ?.success
+    ).toBe(false)
+    expect(
+      parse({ ...sleep, paneKeys: [paneKey], records: [{ ...record, worktreeId: 'repo-2::/x' }] })
+        ?.success
+    ).toBe(false)
+    expect(parse({ ...wake, paneKeys: [paneKey] })?.success).toBe(true)
+    expect(parse({ ...wake })?.success).toBe(false)
+    expect(parse({ ...wake, paneKeys: [paneKey, paneKey] })?.success).toBe(false)
+    expect(parse({ ...wake, paneKeys: [otherTabPane] })?.success).toBe(false)
   })
 
   it('applies group sizes to the workspace’s routed partition', async () => {

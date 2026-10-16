@@ -132,13 +132,34 @@ export function legacyRelayBridgePtyIdForPane(args: {
   if (!candidate) {
     return null
   }
-  const claimant = `${args.tabId}\u0000${args.leafId ?? ''}`
+  const claimant = paneClaimant(args.tabId, args.leafId)
   const holder = claims.get(candidate)
   if (holder && holder !== claimant) {
     return null
   }
   claims.set(candidate, claimant)
   return candidate
+}
+
+function paneClaimant(tabId: string, leafId: string | null | undefined): string {
+  return `${tabId}\u0000${leafId ?? ''}`
+}
+
+/** Lets another pane (a converted row's) take a PTY this unmounting pane held. */
+export function releaseLegacyRelayBridgePaneClaim(
+  ptyId: string,
+  tabId: string,
+  leafId: string | null | undefined
+): void {
+  if (claims.get(ptyId) === paneClaimant(tabId, leafId)) {
+    claims.delete(ptyId)
+  }
+}
+
+/** The relay-era tabs holding a pane the bridge serves for this SSH target. */
+export function legacyRelayBridgedTabIds(targetId: string): string[] {
+  ensureSubscribed()
+  return [...new Set(panes.filter((pane) => pane.targetId === targetId).map((p) => p.tabId))]
 }
 
 export function onLegacyRelayBridgedPanesChanged(listener: () => void): () => void {

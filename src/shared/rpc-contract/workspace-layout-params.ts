@@ -1,10 +1,11 @@
 import { z } from 'zod'
-import { isTerminalLeafId } from '../stable-pane-id'
+import { isTerminalLeafId, parsePaneKey } from '../stable-pane-id'
 import { isValidHostTerminalTabId } from '../terminal-tab-id'
 import type { TuiAgent } from '../tui-agent'
 import { isTuiAgent } from '../tui-agent-config'
 import { TerminalPaneLayoutNodeSchema } from './session-tabs-schemas-params'
 import { TerminalOrphanGroupLayout } from './terminal-orphan-params'
+import { sleepingAgentSessionRecordSchema } from '../workspace-session-sleeping-agents'
 
 export const LayoutSubscribeParams = z
   .object({
@@ -218,6 +219,53 @@ const SetBrowserTabProfileCommand = z.object({
 const PromotePreviewTabCommand = z.object({ type: z.literal('promotePreviewTab'), ...OnTab })
 
 /**
+ * Restored editor tabs the window moved to the workspace that owns their file (F42): the window
+ * resolved that owner. Main refuses it when the two workspaces are in different partitions.
+ */
+const MoveTabToWorkspaceCommand = z.object({
+  type: z.literal('moveTabToWorkspace'),
+  workspace: OnPane.workspace,
+  toWorkspace: z.string().min(1),
+  tabs: z
+    .array(
+      z.object({
+        tabId: z.string().min(1),
+        newTabId: z.string().min(1),
+        newEntityId: z.string().min(1)
+      })
+    )
+    .min(1),
+  groupId: z.string().min(1),
+  file: EditorFileRecord.optional()
+})
+
+/** Pane keys of the command's own tab only, so a sleep or wake never reaches past it. */
+function paneKeysNameTab(command: { tabId: string; paneKeys: string[] }): boolean {
+  return command.paneKeys.every((paneKey) => parsePaneKey(paneKey)?.tabId === command.tabId)
+}
+
+/** The window's sleep of panes of one tab it already stopped; main records how each resumes. */
+const SleepCommand = z
+  .object({
+    type: z.literal('sleep'),
+    ...OnTab,
+    paneKeys: z.array(z.string().min(1)).min(1),
+    records: z.array(sleepingAgentSessionRecordSchema)
+  })
+  .refine(paneKeysNameTab)
+  .refine((command) =>
+    command.records.every(
+      (record) =>
+        record.worktreeId === command.workspace && command.paneKeys.includes(record.paneKey)
+    )
+  )
+
+/** The window's wake of the one pane it shows; never more, so agents are not resumed in bulk. */
+const WakeCommand = z
+  .object({ type: z.literal('wake'), ...OnTab, paneKeys: z.tuple([z.string().min(1)]) })
+  .refine(paneKeysNameTab)
+
+/**
  * A window's layout command (`layout.apply`, registered only in a layout-owner build). The window
  * names what it acts on; main mints every new id but a created terminal tab's
  * (see CreateTerminalTabCommand), a browser tab's and page's, which the window already shows
@@ -245,6 +293,9 @@ export const LayoutApplyParams = z.object({
     ReplaceBrowserPageCommand,
     SetBrowserTabProfileCommand,
     OpenEditorTabCommand,
-    PromotePreviewTabCommand
+    PromotePreviewTabCommand,
+    MoveTabToWorkspaceCommand,
+    SleepCommand,
+    WakeCommand
   ])
 })
