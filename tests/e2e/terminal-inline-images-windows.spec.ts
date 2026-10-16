@@ -73,6 +73,49 @@ for (const runtime of ['native', 'wsl'] as const) {
         )
         .toBe(acceleration === 'on')
       const ptyId = await waitForActivePanePtyId(orcaPage)
+      await orcaPage.evaluate(() => {
+        const tab = window.__store!.getState().activeTabId
+        const term = (tab ? window.__paneManagers?.get(tab) : undefined)?.getActivePane()?.terminal as any
+        const addon = term._addonManager._addons.map((a: any) => a.instance).find((a: any) => a._storage)
+        const storage = addon._storage
+        const renderer = storage._renderer
+        const log: string[] = []
+        ;(window as any).__imgDiagLog = log
+        const t0 = performance.now()
+        const stamp = () => Math.round(performance.now() - t0)
+        const wrap = (obj: any, name: string, describe: (args: any[]) => string) => {
+          const orig = obj[name].bind(obj)
+          obj[name] = (...args: any[]) => {
+            log.push(`${stamp()} ${name} ${describe(args)}`)
+            return orig(...args)
+          }
+        }
+        const oldRender = storage.render.bind(storage)
+        storage.render = (range: any) => {
+          const before = `imgs=${storage._images.size} layer=${renderer.hasLayer('top')} cell=${renderer.cellSize.width.toFixed(2)}x${renderer.cellSize.height} y=${term._core.buffer.y} ydisp=${term._core.buffer.ydisp}`
+          oldRender(range)
+          log.push(`${stamp()} render ${range.start}-${range.end} ${before}`)
+        }
+        wrap(renderer, 'clearAll', (a) => String(a[0]))
+        wrap(renderer, 'insertLayerToDom', (a) => String(a[0]))
+        wrap(renderer, 'removeLayerFromDom', (a) => String(a[0]))
+        const oldRescale = renderer.rescaleCanvas.bind(renderer)
+        renderer.rescaleCanvas = () => {
+          const ctx = renderer._layers.get('top')
+          const w0 = ctx?.canvas.width, h0 = ctx?.canvas.height
+          oldRescale()
+          if (ctx && (ctx.canvas.width !== w0 || ctx.canvas.height !== h0)) log.push(`${stamp()} rescale ${w0}x${h0}->${ctx.canvas.width}x${ctx.canvas.height}`)
+        }
+        const oldAdd = storage.addImage.bind(storage)
+        storage.addImage = (img: any, opts: any) => {
+          const y0 = term._core.buffer.y
+          const id = oldAdd(img, opts)
+          log.push(`${stamp()} addImage id=${id} ${img.width}x${img.height} y=${y0}->${term._core.buffer.y}`)
+          return id
+        }
+        term.onResize((e: any) => log.push(`${stamp()} resize ${e.cols}x${e.rows}`))
+        term.onWriteParsed(() => log.push(`${stamp()} writeParsed y=${term._core.buffer.y}`))
+      })
       const marker = 'WINDOWS_INLINE_IMAGES_DONE'
       const rawPayload = `${inlineImagePayload(true)}${marker}\r\n`
       const payload = Buffer.from(rawPayload).toString('base64')
@@ -130,6 +173,7 @@ for (const runtime of ['native', 'wsl'] as const) {
           return { cols: term.cols, rows: term.rows, ydisp: buffer.ydisp, ybase: buffer.ybase, cell: dims.css.cell, canvas: dims.css.canvas, cellSize: renderer.cellSize, layers, images, rowsWithTiles, blueLayerPixelsBefore: before, fullyCleared: storage._fullyCleared, needsFullClear: storage._needsFullClear, renderer: core._renderService._renderer?.value?.constructor?.name, paused: core._renderService._isPaused }
         })
         console.log('REPAINT_DIAG', JSON.stringify(dump))
+        console.log('REPAINT_LOG', JSON.stringify(await orcaPage.evaluate(() => (window as any).__imgDiagLog)))
         await new Promise((r) => setTimeout(r, 500))
         await orcaPage.screenshot({ path: testInfo.outputPath('windows-inline-after-refresh.png') })
         throw error
