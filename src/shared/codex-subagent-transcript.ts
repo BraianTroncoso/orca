@@ -171,7 +171,7 @@ function readTurnEnd(
   }
   const payload = record(recordValue.payload)
   const turnId = typeof payload?.turn_id === 'string' ? payload.turn_id.trim() : ''
-  if (payload?.type !== 'task_complete' || !turnId) {
+  if ((payload?.type !== 'task_complete' && payload?.type !== 'turn_complete') || !turnId) {
     return undefined
   }
   return { turnId, end: payload.error == null ? 'completed' : 'failed' }

@@ -56,5 +56,6 @@ export function pollCodexTranscriptStatus(
     markCodexLeadTurnInterrupted(state, original.paneKey)
   }
   const payload = buildCodexChildDrivenStatusPayload(state, undefined, original.paneKey, {})
-  return payload ? { ...original, payload } : undefined
+  // Why: only a replayed Stop may carry an event name; this row restates the last hook's.
+  return payload ? { ...original, hookEventName: undefined, payload } : undefined
 }
