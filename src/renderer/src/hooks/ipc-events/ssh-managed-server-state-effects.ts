@@ -10,7 +10,6 @@ import { translate } from '@/i18n/i18n'
 import { useAppStore } from '../../store'
 import { withoutConvertedSshHostRows } from '../../store/repos/converted-ssh-host-rows'
 import { preserveConvertedSshBrowserPages } from '../../store/repos/converted-ssh-browser-pages'
-import { legacyRelayBridgedTabIds } from '../../components/terminal-pane/legacy-relay-bridge-panes'
 
 type ManagedServerStatus = SshConnectionState['managedServer']
 
@@ -66,10 +65,16 @@ function remountBridgedTabsOnce(targetId: string, next: ManagedServerStatus): vo
     return
   }
   bridgedTargetsRemounted.add(targetId)
-  const store = useAppStore.getState()
-  for (const tabId of legacyRelayBridgedTabIds(targetId)) {
-    store.remountTerminalTabForRecovery(tabId)
-  }
+  // Why lazy: the panes module subscribes to the bridge when loaded; importing it here would do so
+  // for every importer of this file.
+  void import('../../components/terminal-pane/legacy-relay-bridge-panes').then(
+    ({ legacyRelayBridgedTabIds }) => {
+      const store = useAppStore.getState()
+      for (const tabId of legacyRelayBridgedTabIds(targetId)) {
+        store.remountTerminalTabForRecovery(tabId)
+      }
+    }
+  )
 }
 
 type CatalogLoad = {

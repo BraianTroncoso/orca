@@ -57,21 +57,35 @@ describe('a host kept connected for the relay bridge', () => {
     bridged: true
   }
 
-  it('remounts the relay-era tabs the bridge serves once, so they reattach (STA-10604)', () => {
+  it('remounts the relay-era tabs the bridge serves once, so they reattach (STA-10604)', async () => {
     applySshManagedServerTransition('ssh-1', { kind: 'setting-up', phase: 'converting' }, bridged)
-    expect(mocks.remountTerminalTabForRecovery.mock.calls).toEqual([['tab-1'], ['tab-2']])
+    await vi.waitFor(() =>
+      expect(mocks.remountTerminalTabForRecovery.mock.calls).toEqual([['tab-1'], ['tab-2']])
+    )
     mocks.remountTerminalTabForRecovery.mockClear()
     applySshManagedServerTransition('ssh-1', bridged, bridged)
     applySshManagedServerTransition('ssh-1', undefined, offer)
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mocks.remountTerminalTabForRecovery).not.toHaveBeenCalled()
     expect(mocks.toast.error).not.toHaveBeenCalled()
   })
 
-  it('still remounts when the connect reply stored the bridged status before its push', () => {
+  it('still remounts when the connect reply stored the bridged status before its push', async () => {
     applySshManagedServerTransition('ssh-1', undefined, offer)
     mocks.remountTerminalTabForRecovery.mockClear()
     applySshManagedServerTransition('ssh-1', bridged, bridged)
-    expect(mocks.remountTerminalTabForRecovery.mock.calls).toEqual([['tab-1'], ['tab-2']])
+    await vi.waitFor(() =>
+      expect(mocks.remountTerminalTabForRecovery.mock.calls).toEqual([['tab-1'], ['tab-2']])
+    )
+  })
+
+  it('never loads the bridge panes module, which subscribes on load, just by being imported', async () => {
+    vi.resetModules()
+    vi.doUnmock('../../components/terminal-pane/legacy-relay-bridge-panes')
+    const listPanes = vi.fn(() => undefined)
+    Object.assign(window, { api: { ssh: {}, legacyRelayBridge: { listPanes, onPanes: vi.fn() } } })
+    await import('./ssh-managed-server-state-effects')
+    expect(listPanes).not.toHaveBeenCalled()
   })
 })
 
