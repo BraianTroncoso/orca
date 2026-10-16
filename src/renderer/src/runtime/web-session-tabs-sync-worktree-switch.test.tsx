@@ -36,6 +36,7 @@ import { resetWebSessionTabsSnapshotFreshnessForTests } from './web-session-tabs
 import { useWebSessionTabsSync } from './web-session-tabs-sync/use-web-session-tabs-sync'
 import { clearRuntimeEnvironmentConnectionGenerationsForTests } from '@/store/slices/runtime-status'
 import { resetWebRuntimeInitialTerminalBootstrapForTests } from './web-runtime-initial-terminal-bootstrap'
+import { TERMINAL_WORKTREE_HOT_RETAIN_LIMIT } from '@/components/terminal-pane/terminal-hidden-view-parking'
 
 const ENV = 'env-a'
 const WORKTREE_A = 'repo-a::worktree-a'
@@ -228,6 +229,26 @@ describe('session-tabs streams across worktree switches on one host', () => {
     expect(worktreeStreams()).toHaveLength(installed + 1)
     expect(latestStream(WORKTREE_A)).toBe(streamA)
     expect(streamA.unsubscribe).not.toHaveBeenCalled()
+  })
+
+  it('keeps one stream per worktree while cycling the mounted-terminal working set', async () => {
+    await connect()
+    const installed = worktreeStreams().length
+    const closed = (): number =>
+      worktreeStreams().filter((stream) => stream.unsubscribe.mock.calls.length > 0).length
+    const closedBefore = closed()
+    const cycle = [WORKTREE_A, ...['b', 'c', 'd', 'e'].map((id) => `repo-a::worktree-${id}`)]
+    expect(cycle).toHaveLength(1 + TERMINAL_WORKTREE_HOT_RETAIN_LIMIT)
+
+    for (let round = 0; round < 4; round += 1) {
+      for (const worktreeId of cycle) {
+        await selectWorktree(worktreeId)
+      }
+    }
+
+    // Before the pool matched the retained set, every switch around five worktrees resubscribed.
+    expect(worktreeStreams()).toHaveLength(installed + cycle.length - 1)
+    expect(closed()).toBe(closedBefore)
   })
 
   it('leaves the mirrored panes untouched when the user switches back', async () => {

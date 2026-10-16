@@ -116,7 +116,14 @@
     }
   },
   "githubChecks": {
-    "retrying": "Nouvelle tentative…"
+    "retrying": "Nouvelle tentative…",
+    "logsNotYetAvailable": "La sortie du journal n’est pas encore disponible.",
+    "logsLoadErrorDetails": "Impossible de charger les journaux. Utilisez Actualiser pour réessayer.",
+    "logsLoadErrorSidebar": "Impossible de charger les journaux. Ouvrez Voir tous les détails, puis utilisez Actualiser pour réessayer.",
+    "logsEmpty": "Aucune sortie de journal n’a été renvoyée.",
+    "logsNotRequested": "L’extrait du journal n’a pas été demandé. Au maximum cinq extraits de tâches en échec sont chargés par vérification.",
+    "noLogExcerpt": "Aucun extrait de journal n’est disponible.",
+    "refreshingDetails": "Actualisation des détails de la vérification…"
   },
   "settings": {
     "chat": {
@@ -8862,7 +8869,8 @@
           "addDescription": "Ajoutez une machine permanente sur laquelle vous pouvez vous connecter en SSH.",
           "editingPrefix": "Modification",
           "allowRemoteCliControl": "Autoriser l'orca CLI de cet hôte à contrôler Orca",
-          "allowRemoteCliControlHelp": "Lorsque cette option est désactivée, les commandes orca exécutées sur cet hôte n'atteignent que ses propres terminaux. Activez-la pour qu'elles atteignent d'autres hôtes, l'orchestration, les fichiers et les intégrations de cet ordinateur."
+          "allowRemoteCliControlHelp": "Lorsque cette option est activée, les commandes orca exécutées sur cet hôte peuvent ouvrir et piloter des onglets du navigateur Orca sur ce bureau, uniquement dans les espaces de travail de cet hôte et uniquement tant qu'il est connecté. Les terminaux lancés par une ancienne version d'Orca sur cet hôte peuvent aussi exécuter des commandes d'orchestration (check, inbox, send, ask, reply) pour leur propre travail supervisé. Elles ne peuvent pas lire vos fichiers, votre presse-papiers ni vos cookies. Lorsqu'elle est désactivée, elles n'atteignent que le serveur Orca de cet hôte.",
+          "allowRemoteCliControlReset": "Orca l'a désactivé après une mise à jour, car il permet désormais à cet hôte de piloter le navigateur de votre bureau et aux terminaux lancés par une ancienne version d'Orca sur cet hôte d'exécuter des commandes d'orchestration. Réactivez-le seulement si vous le souhaitez."
         },
         "TasksPane": {
           "f71d8a9dd3": "Fournisseurs de tâches",
@@ -12532,6 +12540,10 @@
           "detailsUnavailable": "Les détails des informations d'identification du plan ne sont lisibles que sur l'ordinateur exécutant Orca.",
           "siteUnavailable": "Site du plan d'hébergement indisponible"
         },
+        "sshManagedHostRemove": {
+          "description": "{{label}} exécute un serveur Orca géré. Dans Serveurs gérés, utilisez Arrêter… pour retirer le serveur de l’hôte, ou Oublier… si l’hôte n’existe plus. Vous pourrez ensuite supprimer cet hôte SSH.",
+          "open": "Ouvrir Serveurs gérés"
+        },
         "managedServers": {
           "row": {
             "notRunning": "Non démarré",
@@ -12573,7 +12585,11 @@
             "target": "Passer par un hôte SSH",
             "port": "Port du serveur",
             "link": "Utiliser SSH",
-            "linking": "Connexion…"
+            "linking": "Connexion…",
+            "pendingLink": "La connexion via SSH n’a pas abouti.",
+            "pendingUnlink": "L’arrêt de l’accès SSH n’a pas abouti.",
+            "retry": "Réessayer",
+            "cancelLink": "Annuler"
           },
           "search": {
             "title": "Serveurs gérés",
@@ -12654,6 +12670,7 @@
           "tunnelUnsupported": "Cette version d’Orca ne prend pas en charge cet hôte : son serveur SSH n’autorise pas le transfert de port, et Orca n’a pas non plus pu joindre son serveur via la session SSH. Pour continuer à l’utiliser, installez une version antérieure d’Orca.",
           "setupRetry": "Orca n’a pas pu démarrer son serveur sur cet hôte. Réessayez de vous connecter.",
           "moveHeld": "Orca a mis en pause le déplacement des projets de cet hôte vers son serveur géré, car il n’a pas pu confirmer la copie du serveur. Rien n’est perdu : l’hôte conserve ses projets et reste verrouillé jusqu’à la fin du déplacement. Reconnectez-vous pour reprendre. Si le serveur ne peut pas revenir, arrêtez-le ou oubliez-le dans Réglages > Serveurs gérés.",
+          "olderTerminalsBridged": "Pas encore déplacé vers un serveur géré : des terminaux lancés par une version antérieure d’Orca sont toujours en cours d’exécution dans les projets de cet hôte. Ils continuent de fonctionner ici. Fermez-les ou arrêtez-les sur l’hôte, puis reconnectez-vous.",
           "olderTerminalsUncounted": "Des terminaux lancés par une version antérieure d’Orca sont toujours en cours d’exécution sur cet hôte et ne s’arrêtent pas d’eux-mêmes. Fermez-les dans cette version d’Orca ou arrêtez-les sur l’hôte, puis reconnectez-vous.",
           "olderTerminalsUnverifiable": "Orca n’a pas pu confirmer que les terminaux lancés par une version antérieure d’Orca sont terminés. Reconnectez-vous pour réessayer.",
           "olderTerminals_one": "{{count}} terminal lancé par une version antérieure d’Orca est toujours en cours d’exécution sur cet hôte et ne s’arrête pas de lui-même. Fermez-le dans cette version d’Orca ou arrêtez-le sur l’hôte, puis reconnectez-vous.",
@@ -13365,7 +13382,6 @@
                 "fd46a70f1a": "Démarré",
                 "a54ae21c6f": "Statut :",
                 "e4e3af15ee": "Voir tous les détails",
-                "b8c4e2a1f7": "Voir tous les logs",
                 "a2fb3f4408": "Affichage des 100 premiers jobs",
                 "df137989b3": "Affichage des 20 premières annotations",
                 "1f2b980522": "Chargement des détails de la vérification…",
@@ -14265,10 +14281,7 @@
             "databaseCount_other": "{{value0}} bases de données",
             "scanning": "Analyse de {{value0}}",
             "reading": "Lecture de {{value0}} fichiers",
-            "stoppedAfter": "Arrêté après {{value0}}",
-            "scanned": "{{value0}} analysés",
-            "stoppedAt": "arrêté à {{value0}}",
-            "refresh": "Actualiser"
+            "scanned": "{{value0}} analysés"
           }
         }
       },
@@ -18071,6 +18084,13 @@
           "deleteTable": "Supprimer le tableau"
         }
       }
+    },
+    "startup": {
+      "webHostUnreachable": {
+        "title": "Impossible de joindre votre hôte Orca",
+        "description": "Rien n'a été perdu. Orca se rechargera lorsque l'hôte répondra et n'enregistrera aucune modification d'ici là.",
+        "retry": "Réessayer maintenant"
+      }
     }
   },
   "components": {
@@ -19832,7 +19852,8 @@
       "confirmBody": "Le redémarrage met fin à tous les processus en cours d'exécution dans {{sessions}}. Les agents qui prennent en charge la reprise peuvent être repris ensuite ; les shells et autres tâches ne le peuvent pas et doivent être redémarrés. Faites-le lorsque vos agents sont inactifs.",
       "cancel": "Annuler",
       "confirm": "Redémarrer et arrêter les processus"
-    }
+    },
+    "restartedInputNotSent": "Le terminal a redémarré pendant votre saisie, une partie ne lui est peut-être pas parvenue. Vérifiez le nouveau shell avant de la saisir à nouveau."
   },
   "fileSearch": {
     "failed": "La recherche a échoué. Essayer à nouveau."

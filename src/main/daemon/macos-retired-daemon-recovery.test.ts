@@ -32,7 +32,10 @@ vi.mock('./daemon-endpoint-probe', () => ({
 vi.mock('./daemon-process-identity-query', () => ({ getPsProcessIdentityAsync: mocks.identity }))
 vi.mock('./terminal-descendant-shutdown', () => ({ terminateShutdownDescendants: mocks.terminate }))
 vi.mock('./macos-daemon-job-state', () => ({ releaseMacDaemonJob: mocks.release }))
-import { recoverRetiredMacDaemonJobs } from './macos-retired-daemon-recovery'
+import {
+  recoverRetiredMacDaemonJob,
+  recoverRetiredMacDaemonJobs
+} from './macos-retired-daemon-recovery'
 
 const startedAt = 'Mon Oct 12 16:28:32 2026'
 const identity = { commandLine: 'daemon', startedAtMs: Date.parse(startedAt) }
@@ -222,4 +225,24 @@ it('does no discovery for Node/SSH execution hosts or unpackaged builds', async 
   mocks.packaged = false
   await recoverRetiredMacDaemonJobs('/profile/daemon')
   expect(mocks.versions).not.toHaveBeenCalled()
+})
+
+it('reports whether a launch-blocking label was released, reading only that protocol', async () => {
+  await expect(recoverRetiredMacDaemonJob('/profile', '/profile/daemon', 45)).resolves.toBe(true)
+  expect(mocks.job).toHaveBeenCalledWith('/profile', '/profile/daemon', 45)
+  expect(mocks.versions).not.toHaveBeenCalled()
+  expect(kill.mock.calls).toEqual([[job.pid, 'SIGKILL']])
+  expect(mocks.release).toHaveBeenCalledOnce()
+})
+
+it.each([
+  ['no matching job', () => mocks.job.mockResolvedValue(null)],
+  ['a live endpoint', () => mocks.probe.mockResolvedValue('connected')],
+  ['an unreadable endpoint', () => mocks.probe.mockResolvedValue('unknown')],
+  ['a published PID record', () => mocks.stat.mockResolvedValue({})]
+])('leaves a launch-blocking label alone for %s', async (_, arrange) => {
+  arrange()
+  await expect(recoverRetiredMacDaemonJob('/profile', '/profile/daemon', 45)).resolves.toBe(false)
+  expect(kill).not.toHaveBeenCalled()
+  expect(mocks.release).not.toHaveBeenCalled()
 })

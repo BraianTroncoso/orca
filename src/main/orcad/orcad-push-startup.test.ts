@@ -57,6 +57,11 @@ vi.mock('./orcad-app-paths', () => ({
   resolveUserDataPath: () => state.root
 }))
 // The fake store has no account settings; orcad-account-services.test.ts covers the real services.
+// Migration targets the real ~/.orca, which these fixtures do not redirect.
+vi.mock('./orcad-plaintext-credential-migration', () => ({
+  orcadCredentialRoot: () => state.root,
+  migratePlaintextCredentials: () => ({ sealed: 0, failed: 0 })
+}))
 vi.mock('./orcad-account-services', () => ({ createOrcadAccountServices: () => null }))
 vi.mock('./orcad-browser-provider', () => ({ resolveOrcadBrowserProvider: state.browserProvider }))
 vi.mock('./orcad-instance-lock', () => ({

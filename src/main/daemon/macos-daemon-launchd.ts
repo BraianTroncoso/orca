@@ -27,8 +27,15 @@ import {
   readMacDaemonJobState,
   stopMacDaemonJob
 } from './macos-daemon-job-state'
+import { recoverRetiredMacDaemonJob } from './macos-retired-daemon-recovery'
+import { PROTOCOL_VERSION } from './daemon-protocol-version'
 
-type MacDaemonLaunchOptions = Omit<DaemonChildSpawnOptions, 'forkEntryPath' | 'relocatedExecPath'>
+type MacDaemonLaunchOptions = Omit<
+  DaemonChildSpawnOptions,
+  'forkEntryPath' | 'relocatedExecPath'
+> & {
+  runtimeDir: string
+}
 
 /** Why a launch fell back to forking the daemon from the app. */
 export type MacStableLaunchFallbackReason =
@@ -92,6 +99,23 @@ function fallBackToFork(
 }
 
 /**
+ * A label held by a service that retired its endpoint but never exited would refuse every launch;
+ * the recovery verifies that retirement first, so a live or unreadable service is never touched.
+ */
+async function recoverBlockingMacDaemonJob(options: MacDaemonLaunchOptions): Promise<boolean> {
+  try {
+    return await recoverRetiredMacDaemonJob(
+      options.userDataPath,
+      options.runtimeDir,
+      PROTOCOL_VERSION
+    )
+  } catch (error) {
+    console.warn('[daemon] Could not recover the earlier macOS terminal service', error)
+    return false
+  }
+}
+
+/**
  * Starts the daemon under launchd from the signed helper copy, so it keeps Orca's identity when an
  * update replaces the app. Null means no job can claim the endpoint and the caller should fork.
  */
@@ -140,8 +164,13 @@ export async function launchMacDaemonFromStableBundle(
     Date.now() + DAEMON_SHUTDOWN_TIMEOUT_MS + 2_000,
     deadlineMs - BOOTSTRAP_TIMEOUT_MS - STARTUP_TIMEOUT_MS
   )
-  if (!(await releaseMacDaemonJob(service, releaseByMs))) {
-    throw new Error('A macOS terminal service from an earlier launch is still registered')
+  if (
+    !(await releaseMacDaemonJob(service, releaseByMs)) &&
+    !(await recoverBlockingMacDaemonJob(options))
+  ) {
+    throw new Error(
+      'A macOS terminal service from an earlier launch is still registered. Restart terminals from Settings → Manage Sessions.'
+    )
   }
   // The inherited environment can contain credentials; never leave it on disk after bootstrap.
   const jobPath = join(bundle.directory, `launch-${options.launchNonce}.plist`)

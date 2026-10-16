@@ -106,6 +106,7 @@ export async function prepareRuntimePtySpawn(
   // Why: the drop still applies here, but this controller's result has no field for
   // notifyResumeUnavailable — runtime/relay panes start fresh without the notice.
   ctx.launchCommand = codexResumeLaunch.command
+  ctx.codexResumeArgvDropped = codexResumeLaunch.droppedResumeArgv
   args.env = withClaudeProfileTerminalEnv(args.env, ctx.codexSelectionTarget)
   ctx.claudeAuth =
     ctx.isClaudeLaunch && ctx.deps.prepareClaudeAuth
@@ -237,6 +238,7 @@ export async function prepareRuntimePtySpawn(
         isWsl: shouldSkipCodexHomeEnvForWindowsShell(ctx.daemonShellOverride, ctx.cwd),
         wslDistro: ctx.codexSelectionTarget.runtime === 'wsl' ? ctx.expectedWslDistro : null,
         agentStatusHooksEnabled: isAgentStatusHooksEnabled(ptySettings),
+        terminalInlineImages: ptySettings?.terminalInlineImages,
         disabledTuiAgents: ptySettings?.disabledTuiAgents,
         networkProxySettings: ptySettings,
         routeBrowserOpensToClient: ctx.deps.runtime?.shouldRelayTerminalBrowserOpens?.(),

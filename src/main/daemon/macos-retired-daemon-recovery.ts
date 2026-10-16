@@ -41,21 +41,21 @@ async function recoverJob(
   job: RetiredMacDaemonJob,
   userDataPath: string,
   runtimeDir: string
-): Promise<void> {
+): Promise<boolean> {
   if (!(await endpointWasRetired(job))) {
-    return
+    return false
   }
   const identity = await getPsProcessIdentityAsync(job.pid)
   // A newly bootstrapping service may not have published yet; it is never a recovery target.
   if (!identity?.startedAtMs || Date.now() - identity.startedAtMs < 10_000) {
-    return
+    return false
   }
   if (!(await sameJob(job, userDataPath, runtimeDir))) {
-    return
+    return false
   }
   const beforeCapture = await getPsProcessIdentityAsync(job.pid)
   if (beforeCapture?.startedAtMs !== identity.startedAtMs) {
-    return
+    return false
   }
   // Capture before signalling; let the daemon reap children while their exits are verified.
   const snapshot = await captureDescendantSnapshot(job.pid)
@@ -89,6 +89,20 @@ async function recoverJob(
   console.info(
     `[daemon] Recovered retired macOS terminal service protocol=${job.protocolVersion} pid=${job.pid} descendants=${snapshot.descendants.length}`
   )
+  return true
+}
+
+/**
+ * Releases one label held by a service that retired its endpoint and PID record but never exited.
+ * False leaves the job alone: it is live, unverifiable, still starting, or not this endpoint's.
+ */
+export async function recoverRetiredMacDaemonJob(
+  userDataPath: string,
+  runtimeDir: string,
+  protocolVersion: number
+): Promise<boolean> {
+  const job = await readMacDaemonRecoveryJob(userDataPath, runtimeDir, protocolVersion)
+  return job ? recoverJob(job, userDataPath, runtimeDir) : false
 }
 
 /** Explicit Restart only: healthy legacy daemons and newer app protocols retain their sessions. */
