@@ -6,7 +6,8 @@ import {
   type DashboardSnapshot
 } from '../../../../shared/dashboard-snapshot'
 import { dashboardBucketForDotState } from '../dashboard/dashboard-card-bucket'
-import { dashboardCardDotState, isAgentRowUnseen } from '../dashboard/dashboard-row-bucket'
+import { dashboardCardDotState } from '../dashboard/dashboard-row-bucket'
+import { isAgentTurnUnacknowledged } from '@/attention/agent-attention-acknowledgement'
 
 export type DashboardAgentStatusPatchResult = {
   matched: boolean
@@ -48,13 +49,8 @@ export function patchDashboardSnapshotFromAgentStatus(
   }
 
   const stateChanged = event.stateStartedAt > card.stateChangedAt
-  // Why no acknowledgement: the pop-out holds none; an ack comes back in the next snapshot.
-  const unseen = stateChanged
-    ? isAgentRowUnseen(
-        { startedAt: card.startedAt, entry: { stateStartedAt: event.stateStartedAt } },
-        0
-      )
-    : card.unseen
+  // Why ack 0: the event is a live turn and the pop-out holds no acks; the next snapshot has them.
+  const unseen = stateChanged ? isAgentTurnUnacknowledged(0, event.stateStartedAt) : card.unseen
   const dotState = event.state
   const workingMode =
     event.state === 'working' && event.workingMode === 'monitoring' ? event.workingMode : undefined

@@ -1,12 +1,13 @@
 import type { DashboardAgentRow } from '@/components/dashboard/useDashboardData'
-import type { AppState } from '@/store/types'
+import {
+  isAgentRowUnread,
+  type AgentRowUnreadState
+} from '@/components/dashboard/dashboard-row-bucket'
 
-type AcknowledgedAgentTimesState = Pick<AppState, 'acknowledgedAgentsByPaneKey'>
-
-/** Projects only the acknowledgement timestamps rendered by one card. */
-export function selectAcknowledgedAgentTimes(
-  state: AcknowledgedAgentTimesState,
+/** Projects only the unread flags rendered by one card. */
+export function selectAgentRowsUnread(
+  state: AgentRowUnreadState,
   agents: readonly Pick<DashboardAgentRow, 'paneKey'>[]
-): number[] {
-  return agents.map((agent) => state.acknowledgedAgentsByPaneKey[agent.paneKey] ?? 0)
+): boolean[] {
+  return agents.map((agent) => isAgentRowUnread(state, agent.paneKey))
 }

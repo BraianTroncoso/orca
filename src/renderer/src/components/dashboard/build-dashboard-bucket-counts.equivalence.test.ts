@@ -65,7 +65,7 @@ function oracleBucketCounts(
       if (row.rowSource === 'subagent') {
         continue
       }
-      counts[dashboardRowBucketProjection(row, state.acknowledgedAgentsByPaneKey).bucket] += 1
+      counts[dashboardRowBucketProjection(row, state).bucket] += 1
     }
   }
   return counts

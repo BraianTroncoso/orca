@@ -168,7 +168,7 @@ export function buildDashboardSnapshot(
       // agent LABEL and a status word like "Idle". They're marked by
       // startedAt === 0, and must NOT be shown as real conversation.
       const { isTitleDerived, dotState, workingMode, unseen, bucket } =
-        dashboardRowBucketProjection(row, state.acknowledgedAgentsByPaneKey)
+        dashboardRowBucketProjection(row, state)
       const routingPaneKey = row.activationPaneKey ?? row.paneKey
       const parsed = parsePaneKey(routingPaneKey)
       const tabId = parsed?.tabId ?? row.tab.id
@@ -244,7 +244,7 @@ export function buildDashboardSnapshot(
         finishedAt,
         stateChangedAt: row.entry.stateStartedAt || row.startedAt,
         statusUpdatedAt: row.entry.updatedAt,
-        // `isAgentRowUnseen`, the rule the sidebar card bolds by too.
+        // `isAgentRowUnread`, the rule the sidebar card bolds by too.
         unseen,
         askSummary: bucket === 'attention' ? (row.entry.interactivePrompt ?? undefined) : undefined,
         conversationName: boundedLabelOrUndefined(

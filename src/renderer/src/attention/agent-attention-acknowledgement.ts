@@ -30,6 +30,17 @@ export function isAgentTurnUnacknowledged(
   return turnStartedAt != null && acknowledgedAt < turnStartedAt
 }
 
+/** Whether a subject's current turn is unread: the same records and test auto-acknowledgement clears. */
+export function isAgentSubjectUnread(
+  records: AgentAttentionTurnRecords,
+  subjectKey: string
+): boolean {
+  return isAgentTurnUnacknowledged(
+    records.acknowledgedTurnStartedAt[subjectKey] ?? 0,
+    readAgentAttentionTurnStartedAt(records, subjectKey)
+  )
+}
+
 /**
  * Subjects on the viewed surface whose current turn has not been acknowledged yet.
  *

@@ -6,7 +6,10 @@ import {
 } from '../../../../shared/dashboard-snapshot'
 import { dashboardBucketForDotState } from './dashboard-card-bucket'
 import type { AgentRowState } from '@/lib/agent-row-decay-state'
-import { isAgentTurnUnacknowledged } from '@/attention/agent-attention-acknowledgement'
+import {
+  isAgentSubjectUnread,
+  type AgentAttentionTurnRecords
+} from '@/attention/agent-attention-acknowledgement'
 
 /**
  * Project a row state onto the published card vocabulary.
@@ -20,20 +23,28 @@ export function dashboardCardDotState(state: AgentRowState): DashboardCardDotSta
   return state === 'unverifiable' ? 'idle' : state
 }
 
+/** The store slices the agent-row unread rule reads. */
+export type AgentRowUnreadState = {
+  agentStatusByPaneKey: AgentAttentionTurnRecords['liveTurns']
+  retainedAgentsByPaneKey: AgentAttentionTurnRecords['retainedTurns']
+  acknowledgedAgentsByPaneKey: AgentAttentionTurnRecords['acknowledgedTurnStartedAt']
+}
+
 /**
  * The one unread (bold) rule for an agent row, on every surface that draws one.
  *
- * Why title/process-derived rows (`startedAt === 0`) are never unread: they restamp
- * `stateStartedAt` on every rebuild and have no turn record, so auto-acknowledgement could never
- * clear them; their pane's completion still marks the tab and workspace unread.
+ * Why the store's turn records, not the row: auto-acknowledgement clears exactly these, so a row
+ * is bold only while viewing or clicking it can clear it. Rows built from a terminal title, a
+ * subagent or a migration block have no record and are never unread.
  */
-export function isAgentRowUnseen(
-  row: { startedAt: number; entry: { stateStartedAt: number } },
-  acknowledgedAt: number
-): boolean {
-  return isAgentTurnUnacknowledged(
-    acknowledgedAt,
-    row.startedAt === 0 ? null : row.entry.stateStartedAt
+export function isAgentRowUnread(state: AgentRowUnreadState, paneKey: string): boolean {
+  return isAgentSubjectUnread(
+    {
+      liveTurns: state.agentStatusByPaneKey,
+      retainedTurns: state.retainedAgentsByPaneKey,
+      acknowledgedTurnStartedAt: state.acknowledgedAgentsByPaneKey
+    },
+    paneKey
   )
 }
 
@@ -48,7 +59,7 @@ export type DashboardRowBucketProjection = {
 /** Derive the shared dashboard presentation state for one agent row. */
 export function dashboardRowBucketProjection(
   row: Pick<DashboardAgentRow, 'paneKey' | 'entry' | 'state' | 'startedAt'>,
-  acknowledgedAgentsByPaneKey?: Record<string, number>
+  state: AgentRowUnreadState
 ): DashboardRowBucketProjection {
   const isTitleDerived = row.startedAt === 0
   const dotState = dashboardCardDotState(row.state)
@@ -56,7 +67,7 @@ export function dashboardRowBucketProjection(
     row.state === 'working' && row.entry.workingMode === 'monitoring'
       ? row.entry.workingMode
       : undefined
-  const unseen = isAgentRowUnseen(row, acknowledgedAgentsByPaneKey?.[row.paneKey] ?? 0)
+  const unseen = isAgentRowUnread(state, row.paneKey)
   const bucket = dashboardBucketForDotState(
     dashboardCardDisplayState({ dotState, workingMode, unseen })
   )
