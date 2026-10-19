@@ -374,7 +374,7 @@ describe('focusExistingMainWindow', () => {
   // A WSLg RDP reconnect leaves the window mapped with no surface on the Windows
   // desktop. show()/focus() are no-ops on it, so without the remap the relaunch
   // silently does nothing and the running app is unreachable.
-  it('remaps a WSLg window that the reveal could not focus', () => {
+  it('remaps the WSLg surface after revealing an existing window', () => {
     const app = makeFakeApp()
     const window = makeFakeWindow({ focused: false })
     const timer = makeTimer()
@@ -403,8 +403,12 @@ describe('focusExistingMainWindow', () => {
     )
   })
 
-  it('leaves an already focused WSLg window alone instead of flashing it', () => {
-    const window = makeFakeWindow({ focused: true })
+  // Guards against reintroducing an isFocused()/isVisible() check here: a dropped
+  // WSLg surface reports both true, so such a guard skips the remap precisely in
+  // the case it exists to fix. Verified against the real binary — the window was
+  // IsUnMapped while Electron reported visible=true focused=true.
+  it('remaps a WSLg window even when Electron still reports it focused', () => {
+    const window = makeFakeWindow({ focused: true, visible: true })
     const timer = makeTimer()
 
     focusExistingMainWindow({
@@ -416,9 +420,12 @@ describe('focusExistingMainWindow', () => {
       isWslgSession: () => true
     })
 
-    timer.run(250)
     expect(window.calls.hide).not.toHaveBeenCalled()
-    expect(window.calls.show).toHaveBeenCalledTimes(1)
+    timer.run(250)
+    expect(window.calls.hide).toHaveBeenCalledTimes(1)
+    expect(window.calls.show.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+      window.calls.hide.mock.invocationCallOrder[0]
+    )
   })
 
   it('does not remap on plain Linux outside WSLg', () => {

@@ -81,8 +81,8 @@ function retryFocus(window: BrowserWindow, app: Pick<App, 'focus'>, setTimer: Fo
   }, 100)
 }
 
-// Why: long enough for the window manager to answer the reveal above, so a remap
-// only happens once that activation has demonstrably failed.
+// Why: lets the reveal above settle, so the hide() is a distinct unmap rather than
+// something the compositor can coalesce with the show() that just preceded it.
 const WSLG_REMAP_DELAY_MS = 250
 
 // Why: when WSLg's RDP session reconnects, an already-mapped X11 window keeps
@@ -95,7 +95,10 @@ function remapWslgSurface(
   setTimer: FocusTimer
 ): void {
   setTimer(() => {
-    if (window.isDestroyed() || window.isFocused()) {
+    // Why not isFocused()/isVisible(): a dropped WSLg surface leaves Electron
+    // reporting both true for a window X11 has unmapped. That stale belief is the
+    // failure itself, so gating on it skips the remap exactly when it is needed.
+    if (window.isDestroyed()) {
       return
     }
     try {
